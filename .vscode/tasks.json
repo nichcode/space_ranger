@@ -1,0 +1,55 @@
+{
+    "tasks": [
+        {
+            // build debug
+            "type": "shell",
+            "label": "build debug",
+            "command": "call make all config=debug",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": [
+                "$gcc"
+            ],
+            "group": {
+                "kind": "build",
+                "detail": "build debug.",
+                "isDefault": true
+            }
+        },
+        {
+            // build release
+            "type": "shell",
+            "label": "build release",
+            "command": "call make all config=release",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": [
+                "$gcc"
+            ],
+            "group": {
+                "kind": "build",
+                "detail": "build release."
+            }
+        },
+        {
+            // clean
+            "type": "shell",
+            "label": "clean",
+            "command": "call make clean",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": [
+                "$gcc"
+            ],
+            "group": {
+                "kind": "build",
+                "detail": "clean."
+            }
+        }
+
+    ],
+    "version": "2.0.0"
+}

@@ -1,0 +1,30 @@
+{
+    "configurations": [
+        {
+            "name": "win32 debug",
+            "includePath": [
+                "${workspaceFolder}/src",
+                "${workspaceFolder}/third_party/PAL/include"
+            ],
+            "windowsSdkVersion": "10.0.18362.0",
+            "compilerPath": "C:\\msys64\\ucrt64\\bin\\g++.exe",
+            "cStandard": "c17",
+            "cppStandard": "c++17",
+            "intelliSenseMode": "gcc-x64",
+            "configurationProvider": "ms-vscode.makefile-tools"
+        },
+        {
+            "name": "win32 release",
+            "includePath": [
+                "${workspaceFolder}/src",
+                "${workspaceFolder}/third_party/PAL/include"
+            ],
+            "windowsSdkVersion": "10.0.18362.0",
+            "compilerPath": "C:\\msys64\\ucrt64\\bin\\g++.exe",
+            "cStandard": "c17",
+            "cppStandard": "c++17",
+            "intelliSenseMode": "gcc-x64"
+        }
+    ],
+    "version": 4
+}
