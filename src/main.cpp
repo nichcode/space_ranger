@@ -4,6 +4,8 @@
 // src files
 #include "game.cpp"
 #include "player.cpp"
+#include "bullet.cpp"
+#include "group.cpp"
 
 int main(int argc, char** argv)
 {

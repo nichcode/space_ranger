@@ -36,6 +36,8 @@ void Game::Init()
         return;
     }
 
+    m_BulletTexture = PAL_LoadTexture("assets/bullet.png");
+
     PAL_Camera camera;
     camera.view = { 0.0f, 0.0f, 640.0f, 480.0f };
     camera.rotation = 0.0f;
@@ -47,9 +49,11 @@ void Game::Init()
 void Game::Shutdown()
 {
     m_Player.Destroy();
+    m_Bullets.~SpriteGroup();
+
+    PAL_DestroyTexture(m_BulletTexture);
     PAL_DestroyRenderer(m_Renderer);
     PAL_DestroyContext(m_Context);
-    
     PAL_DestroyWindow(m_Window);
     PAL_Shutdown();
 }
@@ -59,10 +63,13 @@ void Game::Run()
     while (!PAL_WindowShouldClose(m_Window)) {
         PAL_PullEvents();
 
-        m_Player.Update();
+        if (PAL_GetKeyState(m_Window, PAL_Keys_Space)) {
+            m_Player.FireBullet(m_BulletTexture, m_Bullets);
+        }
 
         PAL_Clear({ .2f, .2f, .2f, 1.0f });
-        m_Player.Render();
+        m_Player.Update();
+        m_Bullets.Update();
 
         PAL_RendererFlush(m_Renderer);
         PAL_SwapBuffers();

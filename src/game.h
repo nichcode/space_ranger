@@ -12,6 +12,8 @@ private:
     PAL_Renderer* m_Renderer;
 
     Player m_Player;
+    PAL_Texture* m_BulletTexture;
+    SpriteGroup m_Bullets;
 
 public:
     void Init();

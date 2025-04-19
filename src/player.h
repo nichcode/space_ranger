@@ -2,7 +2,7 @@
 #pragma once
 
 #include "PAL/PAL_window.h"
-#include "PAL/PAL_renderer.h"
+#include "bullet.h"
 
 class Player
 {
@@ -13,11 +13,12 @@ private:
     PAL_Rect m_Rect;
 
     f32 m_Speed, m_Velocity;
+    f32 m_ShootCooldown;
 
 public:
     void Init(PAL_Renderer* renderer, PAL_Window* window);
     void Destroy();
 
     void Update();
-    void Render();
+    void FireBullet(PAL_Texture* texture, SpriteGroup& bullets);
 };
