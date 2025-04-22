@@ -13,10 +13,14 @@ private:
 
     Player m_Player;
     PAL_Texture* m_BulletTexture;
+    PAL_Texture* m_MeteorTexture;
     SpriteGroup m_Bullets;
+    SpriteGroup m_Meteors;
 
 public:
     void Init();
     void Shutdown();
     void Run();
 };
+
+i32 GetRandomNum();

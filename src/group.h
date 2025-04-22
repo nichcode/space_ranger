@@ -38,6 +38,14 @@ public:
         m_Sprites.clear();
     }
 
+    void Destroy()
+    {
+        for (Sprite* sprite : m_Sprites) {
+            delete sprite;
+        }
+        m_Sprites.clear();
+    }
+
     void Add(Sprite* sprite);
     void Pop(Sprite* sprite);
     void Remove(Sprite* sprite);

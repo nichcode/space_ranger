@@ -1,6 +1,9 @@
 
 #include "game.h"
+#include "meteor.h"
+
 #include <iostream>
+#include <random>
 
 void Game::Init()
 {
@@ -37,6 +40,7 @@ void Game::Init()
     }
 
     m_BulletTexture = PAL_LoadTexture("assets/bullet.png");
+    m_MeteorTexture = PAL_LoadTexture("assets/meteor.png");
 
     PAL_Camera camera;
     camera.view = { 0.0f, 0.0f, 640.0f, 480.0f };
@@ -44,14 +48,23 @@ void Game::Init()
     PAL_SetRendererCamera(m_Renderer, camera);
 
     m_Player.Init(m_Renderer, m_Window);
+
+    // create meteors
+    i32 count = 0;
+    while (count < 30) {
+        Meteor* meteor = new Meteor();
+        meteor->Init(m_Renderer, m_MeteorTexture);
+        m_Meteors.Add(meteor);
+        count++;
+    }
 }
 
 void Game::Shutdown()
 {
     m_Player.Destroy();
-    m_Bullets.~SpriteGroup();
 
     PAL_DestroyTexture(m_BulletTexture);
+    PAL_DestroyTexture(m_MeteorTexture);
     PAL_DestroyRenderer(m_Renderer);
     PAL_DestroyContext(m_Context);
     PAL_DestroyWindow(m_Window);
@@ -69,9 +82,19 @@ void Game::Run()
 
         PAL_Clear({ .2f, .2f, .2f, 1.0f });
         m_Player.Update();
+        m_Meteors.Update();
         m_Bullets.Update();
 
         PAL_RendererFlush(m_Renderer);
         PAL_SwapBuffers();
     }
+}
+
+i32 GetRandomNum()
+{
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_int_distribution<> dist(0, 1);
+    i32 number = dist(gen);
+    return number;
 }

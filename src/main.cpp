@@ -6,6 +6,7 @@
 #include "player.cpp"
 #include "bullet.cpp"
 #include "group.cpp"
+#include "meteor.cpp"
 
 int main(int argc, char** argv)
 {
