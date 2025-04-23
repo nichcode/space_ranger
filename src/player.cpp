@@ -12,6 +12,8 @@ void Player::Init(PAL_Renderer* renderer, PAL_Window* window)
         return;
     }
     m_Rect = PAL_GetTextureRect(m_Texture);
+    m_Rect.w -= 10.0f;
+    m_Rect.h -= 10.0f;
 
     m_Rect.x = 320.0f - m_Rect.w / 2.0f;
     m_Rect.y = 350.0f;

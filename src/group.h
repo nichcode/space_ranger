@@ -12,11 +12,16 @@ private:
 
     friend class SpriteGroup;
 
+protected:
+    PAL_Rect m_Rect;
+
 public:
     virtual ~Sprite() {}
 
     virtual void Update() {}
     void Kill() { m_Kill = true; }
+
+    PAL_Rect& GetRect() { return m_Rect; }
 };
 
 class SpriteGroup
@@ -63,5 +68,15 @@ public:
             else { it++; }
         }
     }
+
+    std::vector<Sprite*>::iterator begin() { return m_Sprites.begin(); }
+    std::vector<Sprite*>::iterator end() { return m_Sprites.end(); }
+    std::vector<Sprite*>::reverse_iterator rbegin() { return m_Sprites.rbegin(); }
+    std::vector<Sprite*>::reverse_iterator rend() { return m_Sprites.rend(); }
+
+    std::vector<Sprite*>::const_iterator begin() const { return m_Sprites.begin(); }
+    std::vector<Sprite*>::const_iterator end()	const { return m_Sprites.end(); }
+    std::vector<Sprite*>::const_reverse_iterator rbegin() const { return m_Sprites.rbegin(); }
+    std::vector<Sprite*>::const_reverse_iterator rend() const { return m_Sprites.rend(); }
 };
 

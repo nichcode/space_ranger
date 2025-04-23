@@ -17,10 +17,15 @@ private:
     SpriteGroup m_Bullets;
     SpriteGroup m_Meteors;
 
+    u32 m_MeteorCount, m_MaxMeteors;
+
 public:
     void Init();
     void Shutdown();
     void Run();
+
+    void RespawnMeteors();
+    void MeteorPlayerCollisions();
 };
 
 i32 GetRandomNum();

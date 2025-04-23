@@ -50,12 +50,12 @@ void Game::Init()
     m_Player.Init(m_Renderer, m_Window);
 
     // create meteors
-    i32 count = 0;
-    while (count < 30) {
+    m_MaxMeteors = 40;
+    while (m_MeteorCount < m_MaxMeteors) {
         Meteor* meteor = new Meteor();
         meteor->Init(m_Renderer, m_MeteorTexture);
         m_Meteors.Add(meteor);
-        count++;
+        m_MeteorCount++;
     }
 }
 
@@ -80,6 +80,9 @@ void Game::Run()
             m_Player.FireBullet(m_BulletTexture, m_Bullets);
         }
 
+        RespawnMeteors();
+        MeteorPlayerCollisions();
+
         PAL_Clear({ .2f, .2f, .2f, 1.0f });
         m_Player.Update();
         m_Meteors.Update();
@@ -87,6 +90,28 @@ void Game::Run()
 
         PAL_RendererFlush(m_Renderer);
         PAL_SwapBuffers();
+    }
+}
+
+void Game::RespawnMeteors()
+{
+    while (m_MeteorCount < m_MaxMeteors) {
+        Meteor* meteor = new Meteor();
+        meteor->Init(m_Renderer, m_MeteorTexture);
+        m_Meteors.Add(meteor);
+        m_MeteorCount++;
+    }
+}
+
+void Game::MeteorPlayerCollisions()
+{
+    for (Sprite* meteor : m_Meteors) {
+        PAL_Rect& rect = meteor->GetRect();
+        PAL_Rect& player_rect = m_Player.GetRect();
+        if (PAL_RectCollide(player_rect, rect)) {
+            meteor->Kill();
+            m_MeteorCount--;
+        }
     }
 }
 

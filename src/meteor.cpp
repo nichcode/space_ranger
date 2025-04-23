@@ -16,6 +16,8 @@ void Meteor::Init(PAL_Renderer* renderer, PAL_Texture* texture)
         return;
     }
     m_Rect = PAL_GetTextureRect(m_Texture);
+    m_Rect.w -= 20.0f;
+    m_Rect.h -= 20.0f;
     i32 random = GetRandomNum();
 
     m_Rect.x = s_PosX[s_Index];
@@ -69,6 +71,5 @@ void Meteor::Update()
         m_Rect.x = s_PosX[s_Index];
         m_Rect.y = s_PosY[s_Index];
     }
-    
     PAL_RendererDrawTexture(m_Renderer, m_Rect, m_Texture);
 }

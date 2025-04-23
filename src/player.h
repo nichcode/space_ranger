@@ -21,4 +21,6 @@ public:
 
     void Update();
     void FireBullet(PAL_Texture* texture, SpriteGroup& bullets);
+
+    PAL_Rect& GetRect() { return m_Rect; }
 };
