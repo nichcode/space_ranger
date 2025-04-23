@@ -51,17 +51,21 @@ void Game::Init()
 
     // create meteors
     m_MaxMeteors = 40;
+    m_MeteorCount = 0;
     while (m_MeteorCount < m_MaxMeteors) {
         Meteor* meteor = new Meteor();
         meteor->Init(m_Renderer, m_MeteorTexture);
         m_Meteors.Add(meteor);
         m_MeteorCount++;
     }
+
+    m_Lives.Init(m_Renderer);
 }
 
 void Game::Shutdown()
 {
     m_Player.Destroy();
+    m_Lives.Destroy();
 
     PAL_DestroyTexture(m_BulletTexture);
     PAL_DestroyTexture(m_MeteorTexture);
@@ -85,6 +89,7 @@ void Game::Run()
         m_Player.Update();
         m_Meteors.Update();
         m_Bullets.Update();
+        m_Lives.Update();
 
         PAL_RendererFlush(m_Renderer);
         PAL_SwapBuffers();
@@ -108,6 +113,7 @@ void Game::MeteorPlayerCollisions()
         PAL_Rect& player_rect = m_Player.GetRect();
         if (PAL_RectCollide(player_rect, rect)) {
             meteor->Kill();
+            m_Lives.Hit();
             m_MeteorCount--;
         }
     }

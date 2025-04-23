@@ -3,6 +3,7 @@
 
 #include "PAL/PAL.h"
 #include "player.h"
+#include "lives.h"
 
 class Game
 {
@@ -12,6 +13,7 @@ private:
     PAL_Renderer* m_Renderer;
 
     Player m_Player;
+    Lives m_Lives;
     PAL_Texture* m_BulletTexture;
     PAL_Texture* m_MeteorTexture;
     SpriteGroup m_Bullets;

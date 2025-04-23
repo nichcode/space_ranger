@@ -7,6 +7,7 @@
 #include "bullet.cpp"
 #include "group.cpp"
 #include "meteor.cpp"
+#include "lives.cpp"
 
 int main(int argc, char** argv)
 {
