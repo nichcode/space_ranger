@@ -22,7 +22,7 @@ void Meteor::Init(PAL_Renderer* renderer, PAL_Texture* texture)
 
     m_Rect.x = s_PosX[s_Index];
     m_Rect.y = s_PosY[s_Index];
-    m_Speed = 4.0f;
+    m_Speed = 2.0f;
     m_SpeedX = 1.0f;
 
     if (random == 0) { m_Direction = -1.0f; }

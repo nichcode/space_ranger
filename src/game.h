@@ -26,6 +26,7 @@ public:
 
     void RespawnMeteors();
     void MeteorPlayerCollisions();
+    void BulletMeteorCollisions();
 };
 
 i32 GetRandomNum();

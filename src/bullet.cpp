@@ -11,6 +11,8 @@ void Bullet::Init(PAL_Renderer* renderer, PAL_Texture* texture, f32 x, f32 y)
         return;
     }
     m_Rect = PAL_GetTextureRect(m_Texture);
+    m_Rect.w -= 2.0f;
+    m_Rect.h -= 2.0f;
     m_Rect.x = x;
     m_Rect.y = y;
     m_Speed = 4.0f;

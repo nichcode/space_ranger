@@ -62,6 +62,6 @@ void Player::FireBullet(PAL_Texture* texture, SpriteGroup& bullets)
         f32 y = m_Rect.y + (m_Rect.h / 2.0f) - 90.0f;
         bullet->Init(m_Renderer, texture, x, y);
         bullets.Add(bullet);
-        m_ShootCooldown = 20.0f;
+        m_ShootCooldown = 15.0f;
     }
 }

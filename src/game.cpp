@@ -76,12 +76,10 @@ void Game::Run()
     while (!PAL_WindowShouldClose(m_Window)) {
         PAL_PullEvents();
 
-        if (PAL_GetKeyState(m_Window, PAL_Keys_Space)) {
-            m_Player.FireBullet(m_BulletTexture, m_Bullets);
-        }
-
+        m_Player.FireBullet(m_BulletTexture, m_Bullets);
         RespawnMeteors();
         MeteorPlayerCollisions();
+        BulletMeteorCollisions();
 
         PAL_Clear({ .2f, .2f, .2f, 1.0f });
         m_Player.Update();
@@ -111,6 +109,21 @@ void Game::MeteorPlayerCollisions()
         if (PAL_RectCollide(player_rect, rect)) {
             meteor->Kill();
             m_MeteorCount--;
+        }
+    }
+}
+
+void Game::BulletMeteorCollisions()
+{
+    for (Sprite* bullet : m_Bullets) {
+        for (Sprite* meteor : m_Meteors) {
+            PAL_Rect& bullet_rect = bullet->GetRect();
+            PAL_Rect& meteor_rect = meteor->GetRect();
+            if (PAL_RectCollide(bullet_rect, meteor_rect)) {
+                meteor->Kill();
+                bullet->Kill();
+                m_MeteorCount--;
+            }
         }
     }
 }
