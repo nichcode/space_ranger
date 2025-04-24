@@ -2,33 +2,28 @@
 #pragma once
 
 #include "PAL/PAL.h"
-#include "player.h"
-#include "lives.h"
+#include "state_machine.h"
+
+// states
+#include "title_state.h"
+#include "game_state.h"
 
 class Game
 {
 private:
-    PAL_Window* m_Window;
-    PAL_Context* m_Context;
-    PAL_Renderer* m_Renderer;
+    PAL_Window* m_Window = nullptr;
+    PAL_Context* m_Context = nullptr;
+    PAL_Renderer* m_Renderer = nullptr;
 
-    Player m_Player;
-    Lives m_Lives;
-    PAL_Texture* m_BulletTexture;
-    PAL_Texture* m_MeteorTexture;
-    SpriteGroup m_Bullets;
-    SpriteGroup m_Meteors;
+    PAL_Font* m_Font = nullptr;
 
-    u32 m_MeteorCount, m_MaxMeteors;
+    PersistData m_Data;
+    StateMachine m_States;
 
 public:
     void Init();
     void Shutdown();
     void Run();
-
-    void RespawnMeteors();
-    void MeteorPlayerCollisions();
-    void BulletMeteorCollisions();
 };
 
 i32 GetRandomNum();

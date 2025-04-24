@@ -24,7 +24,9 @@ void Player::Init(PAL_Renderer* renderer, PAL_Window* window)
 
 void Player::Destroy() 
 {
-    PAL_DestroyTexture(m_Texture);
+    if (m_Texture) {
+        PAL_DestroyTexture(m_Texture);
+    }
 }
 
 void Player::Update()

@@ -8,6 +8,9 @@
 #include "group.cpp"
 #include "meteor.cpp"
 #include "lives.cpp"
+#include "state_machine.cpp"
+#include "title_state.cpp"
+#include "game_state.cpp"
 
 int main(int argc, char** argv)
 {

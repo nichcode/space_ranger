@@ -39,39 +39,37 @@ void Game::Init()
         return;
     }
 
-    m_BulletTexture = PAL_LoadTexture("assets/bullet.png");
-    m_MeteorTexture = PAL_LoadTexture("assets/meteor.png");
+    // load shared assets
+    m_Font = PAL_LoadFont("assets/font.ttf", 30.0f);
 
     PAL_Camera camera;
     camera.view = { 0.0f, 0.0f, 640.0f, 480.0f };
     camera.rotation = 0.0f;
     PAL_SetRendererCamera(m_Renderer, camera);
 
-    m_Player.Init(m_Renderer, m_Window);
+    // states
+    TitleState* title_state = new TitleState();
+    GameState* game_state = new GameState();
+    m_States.AddState("title", title_state);
+    m_States.AddState("game", game_state);
 
-    // create meteors
-    m_MaxMeteors = 40;
-    m_MeteorCount = 0;
-    while (m_MeteorCount < m_MaxMeteors) {
-        Meteor* meteor = new Meteor();
-        meteor->Init(m_Renderer, m_MeteorTexture);
-        m_Meteors.Add(meteor);
-        m_MeteorCount++;
-    }
-
-    m_Lives.Init(m_Renderer);
+    m_Data.window = m_Window;
+    m_Data.font = m_Font;
+    m_Data.renderer = m_Renderer;
 }
 
 void Game::Shutdown()
 {
-    m_Player.Destroy();
-    m_Lives.Destroy();
-
-    PAL_DestroyTexture(m_BulletTexture);
-    PAL_DestroyTexture(m_MeteorTexture);
-    PAL_DestroyRenderer(m_Renderer);
-    PAL_DestroyContext(m_Context);
-    PAL_DestroyWindow(m_Window);
+    m_States.Destroy();
+    if (m_Renderer) {
+        PAL_DestroyRenderer(m_Renderer);
+    }
+    if (m_Context) {
+        PAL_DestroyContext(m_Context);
+    }
+    if (m_Window) {
+        PAL_DestroyWindow(m_Window);
+    }
     PAL_Shutdown();
 }
 
@@ -79,66 +77,8 @@ void Game::Run()
 {
     while (!PAL_WindowShouldClose(m_Window)) {
         PAL_PullEvents();
-
-        m_Player.FireBullet(m_BulletTexture, m_Bullets);
-        RespawnMeteors();
-        MeteorPlayerCollisions();
-        BulletMeteorCollisions();
-
-        PAL_Clear({ .2f, .2f, .2f, 1.0f });
-        m_Player.Update();
-        m_Meteors.Update();
-        m_Bullets.Update();
-        m_Lives.Update();
-
+        m_States.Update(&m_Data);
         PAL_RendererFlush(m_Renderer);
         PAL_SwapBuffers();
     }
-}
-
-void Game::RespawnMeteors()
-{
-    while (m_MeteorCount < m_MaxMeteors) {
-        Meteor* meteor = new Meteor();
-        meteor->Init(m_Renderer, m_MeteorTexture);
-        m_Meteors.Add(meteor);
-        m_MeteorCount++;
-    }
-}
-
-void Game::MeteorPlayerCollisions()
-{
-    for (Sprite* meteor : m_Meteors) {
-        PAL_Rect& rect = meteor->GetRect();
-        PAL_Rect& player_rect = m_Player.GetRect();
-        if (PAL_RectCollide(player_rect, rect)) {
-            meteor->Kill();
-            m_Lives.Hit();
-            m_MeteorCount--;
-        }
-    }
-}
-
-void Game::BulletMeteorCollisions()
-{
-    for (Sprite* bullet : m_Bullets) {
-        for (Sprite* meteor : m_Meteors) {
-            PAL_Rect& bullet_rect = bullet->GetRect();
-            PAL_Rect& meteor_rect = meteor->GetRect();
-            if (PAL_RectCollide(bullet_rect, meteor_rect)) {
-                meteor->Kill();
-                bullet->Kill();
-                m_MeteorCount--;
-            }
-        }
-    }
-}
-
-i32 GetRandomNum()
-{
-    std::random_device rd;
-    std::mt19937 gen(rd());
-    std::uniform_int_distribution<> dist(0, 1);
-    i32 number = dist(gen);
-    return number;
 }

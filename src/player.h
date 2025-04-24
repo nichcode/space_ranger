@@ -16,6 +16,7 @@ private:
     f32 m_ShootCooldown;
 
 public:
+    Player() : m_Texture(nullptr) {}
     void Init(PAL_Renderer* renderer, PAL_Window* window);
     void Destroy();
 

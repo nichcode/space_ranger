@@ -13,6 +13,7 @@ private:
     u32 m_Count;
 
 public:
+    Lives() : m_Texture(nullptr) {}
     void Init(PAL_Renderer* renderer);
     void Destroy();
 

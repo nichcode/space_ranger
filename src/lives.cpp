@@ -27,7 +27,9 @@ void Lives::Init(PAL_Renderer* renderer)
 
 void Lives::Destroy()
 {
-    PAL_DestroyTexture(m_Texture);
+    if (m_Texture) {
+        PAL_DestroyTexture(m_Texture);
+    }
 }
 
 void Lives::Hit()
