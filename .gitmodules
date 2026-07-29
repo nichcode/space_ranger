@@ -1,0 +1,3 @@
+[submodule "third_party/PAL"]
+	path = third_party/PAL
+	url = https://github.com/nichcode/PAL.git
