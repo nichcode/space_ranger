@@ -7,7 +7,8 @@ project "SpaceRanger"
 
     includedirs {
         "src",
-        "third_party/PAL/include"
+        "third_party/PAL/include",
+        "third_party/glm/include"
     }
 
     files { "src/*.cpp" }
