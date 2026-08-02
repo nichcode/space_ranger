@@ -1,13 +1,14 @@
 
-#include "pal2/pal_video.h"
-#include "glm/glm.hpp"
+#include "game.h"
 
 int main(int argc, char** argv)
 {
-    palLog(nullptr, "Hello Space Ranger");
-    glm::vec2 veca = {0, 2};
-    glm::vec2 vecb = {4, 6};
-    glm::vec2 vec3 = veca + vecb;
+    Game game;
+    if (!game.initialize()) {
+        return -1;
+    }
 
+    game.run();
+    game.shutdown();
     return 0;
 }
