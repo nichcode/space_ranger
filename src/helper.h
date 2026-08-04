@@ -5,6 +5,7 @@
 
 #define WINDOW_WIDTH 640
 #define WINDOW_HEIGHT 480
+#define MAX_FRAMES_IN_FLIGHT 2
 
 static inline void logResult(
     PalResult result,

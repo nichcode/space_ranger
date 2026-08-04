@@ -3,10 +3,10 @@
 
 #include "pal2/pal_video.h"
 #include "pal2/pal_graphics.h"
+#include "renderer.h"
+#include "helper.h"
 
-#define MAX_FRAMES_IN_FLIGHT 2
-
-struct Game {
+class Game {
 public:
     bool initialize();
     void shutdown();
@@ -31,4 +31,5 @@ bool m_Running;
     PalFence* m_InFlightFences[MAX_FRAMES_IN_FLIGHT];
     PalSemaphore** m_RenderFinishedSemaphores;
     PalFence** m_InFlightImages;
+    Renderer m_Renderer;
 };

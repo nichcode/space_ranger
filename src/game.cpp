@@ -1,7 +1,6 @@
 
 #include "game.h"
 #include "pal2/pal_system.h"
-#include "helper.h"
 
 bool Game::initialize()
 {
@@ -292,6 +291,10 @@ bool Game::initialize()
         }
     }
 
+    if (!m_Renderer.initialize(m_Device, m_CmdBuffers[0], m_Queue)) {
+        return false;
+    }
+
     m_Running = true;
     return true;
 }
@@ -438,6 +441,8 @@ void Game::run()
 void Game::shutdown()
 {
     palWaitQueue(m_Queue);
+    m_Renderer.shutdown();
+
     for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
         palDestroySemaphore(m_ImageAvailableSemaphores[i]);
         palDestroyFence(m_InFlightFences[i]);
