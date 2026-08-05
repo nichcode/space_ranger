@@ -405,7 +405,7 @@ void Game::run()
         barrierInfo.srcStages = barrierInfo.dstStages;
         barrierInfo.newState = PAL_USAGE_STATE_PRESENT;
         barrierInfo.dstStages = PAL_PIPELINE_STAGE_NONE;
-        // palCmdImageBarrier(m_CmdBuffers[currentFrame], image, &imageRange, &barrierInfo);
+        palCmdImageBarrier(m_CmdBuffers[currentFrame], image, &imageRange, &barrierInfo);
 
         result = palCmdEnd(m_CmdBuffers[currentFrame]);
         if (result != PAL_RESULT_SUCCESS) {

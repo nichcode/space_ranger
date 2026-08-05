@@ -1,17 +1,11 @@
 
 #include "renderer.h"
-#include "glm/glm.hpp"
 
 #define MAX_QUADS 10000
 #define MAX_VERTICES MAX_QUADS * 4
 #define MAX_INDICES MAX_QUADS * 6
 
-struct Vertex {
-    glm::vec3 pos;
-    glm::vec2 uv;
-    glm::vec4 color;
-    float texIndex;
-};
+static glm::vec4 quadVertices[4];
 
 static inline uint32_t align(
     uint32_t value,
@@ -65,6 +59,18 @@ bool Renderer::initialize(
             logResult(result, "Failed to create buffer");
             return false;
         }
+
+        void* ptr = nullptr;
+        result = palMapBuffer(frame->uploadBuffer, 0, bufferCreateInfo.size, &ptr);
+        if (result != PAL_RESULT_SUCCESS) {
+            logResult(result, "Failed to map buffer");
+            return false;
+        }
+
+        frame->ptr = (Vertex*)ptr;
+        frame->vertexCount = 0;
+        frame->indexCount = 0;
+        frame->offset = 0;
     }
 
     // create index buffer
@@ -144,7 +150,13 @@ bool Renderer::initialize(
     palDestroyFence(fence);
     palFree(nullptr, indices);
 
+    quadVertices[0] = { -0.5f, -0.5f, 0.0f, 1.0f };
+    quadVertices[1] = {  0.5f, -0.5f, 0.0f, 1.0f };
+    quadVertices[2] = {  0.5f,  0.5f, 0.0f, 1.0f };
+    quadVertices[3] = { -0.5f,  0.5f, 0.0f, 1.0f };
+
     m_Device = device;
+    m_CurrentFrame = nullptr;
     return true;
 }
 
@@ -153,6 +165,49 @@ void Renderer::shutdown()
     palDestroyBuffer(m_IndexBuffer);
     for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
         palDestroyBuffer(m_Frames[i].vertexBuffer);
+        palUnmapBuffer(m_Frames[i].uploadBuffer);
         palDestroyBuffer(m_Frames[i].uploadBuffer);
     }
+}
+
+void Renderer::begin(uint32_t frameIndex)
+{
+    m_CurrentFrame = &m_Frames[frameIndex];
+    reset(m_CurrentFrame);
+}
+
+void Renderer::end(PalCommandBuffer* cmdBuffer)
+{
+    flush(cmdBuffer);
+}
+
+void Renderer::reset(Frame* frame)
+{
+    frame->offset = 0;
+    frame->indexCount = 0;
+    frame->vertexCount = 0;
+}
+
+void Renderer::flush(PalCommandBuffer* cmdBuffer)
+{
+    // TODO: bind descriptor set and pipeline
+
+    // copy the upload buffer to the vertex buffer
+    uint32_t dataSize = sizeof(Vertex) * m_CurrentFrame->vertexCount;
+    PalBufferCopyInfo copyInfo = {0};
+    copyInfo.size = dataSize;
+    palCmdCopyBuffer(
+        cmdBuffer, 
+        m_CurrentFrame->vertexBuffer, 
+        m_CurrentFrame->uploadBuffer, 
+        &copyInfo);
+
+    // put a barrier to make sure the copy is completed before draw
+    PalBarrierInfo barrierInfo = {0};
+    barrierInfo.oldState = PAL_USAGE_STATE_TRANSFER_WRITE;
+    barrierInfo.srcStages = PAL_PIPELINE_STAGE_TRANSFER;
+    barrierInfo.newState = PAL_USAGE_STATE_SHADER_READ;
+    barrierInfo.dstStages = PAL_PIPELINE_STAGE_VERTEX_SHADER;
+    palCmdBufferBarrier(cmdBuffer, m_CurrentFrame->vertexBuffer, &barrierInfo);
+    palCmdDrawIndexed(cmdBuffer, m_CurrentFrame->indexCount, 1, 0, 0, 0);
 }
