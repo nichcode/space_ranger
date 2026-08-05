@@ -171,7 +171,7 @@ local function generateTasksJson()
     end
 end
 
-local function writeLaunchConfiguration(file, app, isDebug)
+local function writeLaunchConfiguration(file, isDebug)
     local name = ""
     local preLaunchTask = ""
     local dir = ""
@@ -197,7 +197,7 @@ local function writeLaunchConfiguration(file, app, isDebug)
     file:write('            "type": "cppdbg",\n')
     file:write('            "request": "launch",\n')
     file:write('            "stopAtEntry": false,\n')
-    file:write(string.format('            "cwd": "${workspaceFolder}/%s",\n', "src"))
+    file:write('            "cwd": ${workspaceFolder}",\n')
 
     file:write('            "environment": [],\n')
     file:write('            "externalConsole": false,\n')
@@ -234,11 +234,11 @@ local function generateLaunchJson()
         file:write('{\n')
         file:write('    "configurations": [\n')
 
-        writeLaunchConfiguration(file, "tests", true)
+        writeLaunchConfiguration(file, true)
         file:write("        },\n")
         file:write('\n')
 
-        writeLaunchConfiguration(file, "tests", false)
+        writeLaunchConfiguration(file, false)
         file:write("        }\n")
 
         file:write("    ],\n")
