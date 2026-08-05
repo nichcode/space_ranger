@@ -291,7 +291,14 @@ bool Game::initialize()
         }
     }
 
-    if (!m_Renderer.initialize(m_Device, m_CmdBuffers[0], m_Queue)) {
+    RendererInitInfo rendererInitInfo = {0};
+    rendererInitInfo.attachmentFormat = imageInfo.format;
+    rendererInitInfo.cmdBuffer = m_CmdBuffers[0];
+    rendererInitInfo.device = m_Device;
+    rendererInitInfo.queue = m_Queue;
+    rendererInitInfo.shaderFormats = adapterInfo.shaderFormats;
+
+    if (!m_Renderer.initialize(&rendererInitInfo)) {
         return false;
     }
 

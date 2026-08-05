@@ -5,11 +5,19 @@
 #include "helper.h"
 #include "glm/glm.hpp"
 
+struct RendererInitInfo {
+    PalDevice* device;
+    PalCommandBuffer* cmdBuffer;
+    PalQueue* queue;
+    PalShaderFormats shaderFormats;
+    PalFormat attachmentFormat;
+};
+
 struct Vertex {
     glm::vec3 pos;
     glm::vec2 uv;
     glm::vec4 color;
-    float texIndex;
+    uint32_t texIndex;
 };
 
 struct Frame {
@@ -23,11 +31,7 @@ struct Frame {
 
 class Renderer {
 public:
-    bool initialize(
-        PalDevice* device, 
-        PalCommandBuffer* cmdBuffer, 
-        PalQueue* queue);
-        
+    bool initialize(RendererInitInfo* info); 
     void shutdown();
     void begin(uint32_t frameIndex);
     void end(PalCommandBuffer* cmdBuffer);
@@ -41,4 +45,10 @@ private:
     PalBuffer* m_IndexBuffer;
     Frame* m_CurrentFrame;
     Frame m_Frames[MAX_FRAMES_IN_FLIGHT];
+
+    PalDescriptorSetLayout* m_DescriptorSetLayout;
+    PalDescriptorPool* m_DescriptorPool;
+    PalDescriptorSet* m_DescriptorSet;
+    PalPipelineLayout* m_PipelineLayout;
+    PalPipeline* m_QuadPipeline;
 };
