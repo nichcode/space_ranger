@@ -8,7 +8,8 @@ project "SpaceRanger"
     includedirs {
         "src",
         "third_party/PAL/include",
-        "third_party/glm/include"
+        "third_party/glm/include",
+        "third_party/stb_image/include"
     }
 
     files { "src/*.cpp" }
