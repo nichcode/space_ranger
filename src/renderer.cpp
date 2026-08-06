@@ -9,6 +9,7 @@
 #define MAX_QUADS 10000
 #define MAX_VERTICES MAX_QUADS * 4
 #define MAX_INDICES MAX_QUADS * 6
+#define MAX_TEXTURE_SLOTS 16
 
 struct Vertex {
     glm::vec3 pos;
@@ -21,7 +22,10 @@ struct PushConstant {
     glm::mat4 viewProjection;
 };
 
-static glm::vec4 quadVertices[4];
+static glm::vec4 s_Vertices[4];
+static glm::vec2 s_TextureCoords[4];
+static Texture* s_TextureSlots[MAX_TEXTURE_SLOTS];
+static uint32_t s_TextureSlotIndex = 0;
 
 static void PAL_CALL onGraphicsDebug(
     void* userData,
@@ -45,10 +49,15 @@ void Renderer::initialize(PalWindow* window)
     }
 
     memset(m_Frames, 0, sizeof(Frame) * MAX_FRAMES_IN_FLIGHT);
-    quadVertices[0] = { -0.5f, -0.5f, 0.0f, 1.0f };
-    quadVertices[1] = {  0.5f, -0.5f, 0.0f, 1.0f };
-    quadVertices[2] = {  0.5f,  0.5f, 0.0f, 1.0f };
-    quadVertices[3] = { -0.5f,  0.5f, 0.0f, 1.0f };
+    s_Vertices[0] = { -0.5f, -0.5f, 0.0f, 1.0f };
+    s_Vertices[1] = {  0.5f, -0.5f, 0.0f, 1.0f };
+    s_Vertices[2] = {  0.5f,  0.5f, 0.0f, 1.0f };
+    s_Vertices[3] = { -0.5f,  0.5f, 0.0f, 1.0f };
+
+    s_TextureCoords[0] = { 0.0f, 0.0f };
+    s_TextureCoords[1] = { 1.0f, 0.0f };
+    s_TextureCoords[2] = { 1.0f, 1.0f };
+    s_TextureCoords[3] = { 0.0f, 1.0f };
 
     m_ImageRange.layerArrayCount = 1;
     m_ImageRange.mipLevelCount = 1;
@@ -204,6 +213,26 @@ void Renderer::beginRendering(float r, float g, float b, float a)
     resetBatch();
 }
 
+void Renderer::drawQuad(float x, float y, Texture* texture)
+{
+    nextBatch();
+    uint32_t textureIndex = getTextureIndex(texture);
+    Frame* frame = &m_Frames[m_FrameIndex];
+
+    // TODO: make position vec2, remove color and build transform
+    for (int i = 0; i < 4; i++) {
+        Vertex* quad = &frame->ptr[frame->offset + i];
+        quad->color = { 1.0f, 1.0f, 1.0f, 1.0f };
+        // quad->pos = transform * s_Vertices[i];
+        quad->texIndex = textureIndex;
+        quad->uv = s_TextureCoords[i];
+    }
+
+    frame->offset += 4;
+    frame->indexCount += 6;
+    frame->vertexCount += 4;
+}
+
 void Renderer::endRendering()
 {
     Frame* frame = &m_Frames[m_FrameIndex];
@@ -351,7 +380,7 @@ void Renderer::createDevice()
         }
 
         palGetAdapterCapabilities(m_Adapter, &caps);
-        if (caps.maxGraphicsQueues == 0) {
+        if (caps.maxGraphicsQueues == 0 || caps.maxCopyQueues) {
             m_Adapter = nullptr;
             continue;
 
@@ -887,6 +916,7 @@ void Renderer::resetBatch()
     frame->offset = 0;
     frame->indexCount = 0;
     frame->vertexCount = 0;
+    s_TextureSlotIndex = 0;
 }
 
 void Renderer::flushBatch()
@@ -910,4 +940,31 @@ void Renderer::flushBatch()
 
     // palCmdBufferBarrier(frame->cmdBuffer, frame->vertexBuffer, &barrierInfo);
     // palCmdDrawIndexed(frame->cmdBuffer, frame->indexCount, 1, 0, 0, 0);
+}
+
+void Renderer::nextBatch()
+{
+    Frame* frame = &m_Frames[m_FrameIndex];
+    if (frame->vertexCount >= MAX_VERTICES || s_TextureSlotIndex >= MAX_TEXTURE_SLOTS) {
+        flushBatch();
+        resetBatch();
+    }
+}
+
+uint32_t Renderer::getTextureIndex(Texture* texture)
+{
+    if (s_TextureSlotIndex == 0) {
+        return 0;
+    }
+
+    for (uint32_t i = 0; i < s_TextureSlotIndex; i++) {
+        if (s_TextureSlots[i] == texture) {
+            return i; 
+        }
+    }
+
+    nextBatch();
+    uint32_t index = s_TextureSlotIndex++;
+    s_TextureSlots[index] = texture;
+    return index;
 }

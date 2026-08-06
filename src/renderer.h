@@ -7,6 +7,7 @@
 #define MAX_FRAMES_IN_FLIGHT 2
 
 struct Vertex;
+struct Texture;
 
 struct Frame {
     uint32_t vertexCount;
@@ -26,6 +27,7 @@ public:
     void shutdown();
 
     void beginRendering(float r, float g, float b, float a);
+    void drawQuad(float x, float y, Texture* texture);
     void endRendering();
 
 private:
@@ -40,6 +42,8 @@ private:
 
     void resetBatch();
     void flushBatch();
+    void nextBatch();
+    uint32_t getTextureIndex(Texture* texture);
 
 private:
     PalAdapter* m_Adapter = nullptr;
