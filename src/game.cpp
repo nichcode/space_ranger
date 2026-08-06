@@ -8,12 +8,14 @@ bool Game::initialize()
     PalResult result = palCreateEventDriver(&eventDriverCreateInfo, &m_EventDriver);
     if (result != PAL_RESULT_SUCCESS) {
         logResult(result, "Failed to create event driver");
+        DEBUG_BREAK();
         return false;
     }
 
     result = palInitVideo(nullptr, m_EventDriver, nullptr);
     if (result != PAL_RESULT_SUCCESS) {
         logResult(result, "Failed to initialize video");
+        DEBUG_BREAK();
         return false;
     }
 
@@ -34,6 +36,7 @@ bool Game::initialize()
     result = palCreateWindow(&createInfo, &m_Window);
     if (result != PAL_RESULT_SUCCESS) {
         logResult(result, "Failed to create window");
+        DEBUG_BREAK();
         return false;
     }
 
@@ -42,10 +45,7 @@ bool Game::initialize()
         PAL_EVENT_TYPE_WINDOW_CLOSE, 
         PAL_DISPATCH_MODE_POLL);
 
-    if (!m_Renderer.initialize(m_Window)) {
-        return false;
-    }
-
+    m_Renderer.initialize(m_Window);
     m_Running = true;
     return true;
 }

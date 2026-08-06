@@ -22,7 +22,7 @@ struct Frame {
 
 class Renderer {
 public:
-    bool initialize(PalWindow* window); 
+    void initialize(PalWindow* window); 
     void shutdown();
 
     void beginRendering(float r, float g, float b, float a);
@@ -61,6 +61,7 @@ private:
     PalPipelineLayout* m_PipelineLayout = nullptr;
     PalPipeline* m_QuadPipeline = nullptr;
     PalBuffer* m_IndexBuffer = nullptr;
+    PalBuffer* m_IndexStagingBuffer = nullptr;
 
     PalShaderFormats m_ShaderFormats = 0;
     uint32_t m_MaxGraphicsQueues = 0;

@@ -6,6 +6,12 @@
 #define WINDOW_WIDTH 640
 #define WINDOW_HEIGHT 480
 
+#if defined(_MSC_VER)
+#define DEBUG_BREAK() __debugbreak()
+#else
+#define DEBUG_BREAK() __builtin_trap()
+#endif // _MSC_VER
+
 static inline void logResult(
     PalResult result,
     const char* msg)

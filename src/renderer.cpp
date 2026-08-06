@@ -17,19 +17,31 @@ struct Vertex {
     uint32_t texIndex;
 };
 
-struct PushConstant
-{
+struct PushConstant {
     glm::mat4 viewProjection;
 };
 
 static glm::vec4 quadVertices[4];
 
-bool Renderer::initialize(PalWindow* window)
+static void PAL_CALL onGraphicsDebug(
+    void* userData,
+    PalDebugMessageSeverity severity,
+    PalDebugMessageType type,
+    const char* msg)
 {
-    PalResult result = palInitGraphics(nullptr, nullptr, 0, nullptr);
+    palLog(nullptr, msg);
+}
+
+void Renderer::initialize(PalWindow* window)
+{
+    PalGraphicsDebugger debugger = {0};
+    debugger.callback = onGraphicsDebug;
+
+    PalResult result = palInitGraphics(&debugger, nullptr, 0, nullptr);
     if (result != PAL_RESULT_SUCCESS) {
         logResult(result, "Failed to initialize graphics");
-        return false;
+        DEBUG_BREAK();
+        return;
     }
 
     memset(m_Frames, 0, sizeof(Frame) * MAX_FRAMES_IN_FLIGHT);
@@ -44,54 +56,27 @@ bool Renderer::initialize(PalWindow* window)
     m_ImageRange.startMipLevel = 0;
 
     createDevice();
-    if (m_Device == nullptr) {
-        return false;
-    }
-
     createSwapchain(window);
-    if (m_Swapchain == nullptr) {
-        return false;
-    }
-
     createSyncObjects();
-    if (m_Frames[0].cmdBuffer == nullptr) {
-        return false;
-    }
-
     createDescriptorObjects();
-    if (m_DescriptorSet == nullptr) {
-        return false;
-    }
 
     createBuffers();
-    if (m_IndexBuffer == nullptr) {
-        return false;
-    }
-
     createPipeline();
-    if (m_QuadPipeline == nullptr) {
-        return false;
-    }
-
+    
     result = palWaitFence(m_Frames[0].fence, PAL_INFINITE);
     if (result != PAL_RESULT_SUCCESS) {
         logResult(result, "Failed to wait fence");
-        return false;
+        DEBUG_BREAK();
+        return;
     }
 
-    result = palResetFence(m_Frames[0].fence);
-    if (result != PAL_RESULT_SUCCESS) {
-        logResult(result, "Failed to reset fence");
-        return false;
-    }
-
+    palDestroyBuffer(m_IndexStagingBuffer);
     result = palResetCommandBuffer(m_Frames[0].cmdBuffer);
     if (result != PAL_RESULT_SUCCESS) {
         logResult(result, "Failed to reset command buffer");
-        return false;
+        DEBUG_BREAK();
+        return;
     }
-
-    return true;
 }
 
 void Renderer::shutdown()
@@ -139,6 +124,7 @@ void Renderer::beginRendering(float r, float g, float b, float a)
     PalResult result = palWaitFence(frame->fence, PAL_INFINITE);
     if (result != PAL_RESULT_SUCCESS) {
         logResult(result, "Failed to wait fence");
+        DEBUG_BREAK();
         return;
     }
 
@@ -150,6 +136,7 @@ void Renderer::beginRendering(float r, float g, float b, float a)
     result = palGetNextSwapchainImage(m_Swapchain, &nextImageInfo, &m_ImageIndex);
     if (result != PAL_RESULT_SUCCESS) {
         logResult(result, "Failed to get next swapchain image");
+        DEBUG_BREAK();
         return;
     }
 
@@ -157,6 +144,7 @@ void Renderer::beginRendering(float r, float g, float b, float a)
         result = palWaitFence(m_InFlightImages[m_ImageIndex], PAL_INFINITE);
         if (result != PAL_RESULT_SUCCESS) {
             logResult(result, "Failed to wait fence");
+            DEBUG_BREAK();
             return;
         }
     }
@@ -165,18 +153,21 @@ void Renderer::beginRendering(float r, float g, float b, float a)
     result = palResetFence(frame->fence);
     if (result != PAL_RESULT_SUCCESS) {
         logResult(result, "Failed to wait fence");
+        DEBUG_BREAK();
         return;
     }
 
     result = palResetCommandBuffer(frame->cmdBuffer);
     if (result != PAL_RESULT_SUCCESS) {
         logResult(result, "Failed to reset command buffer");
+        DEBUG_BREAK();
         return;
     }
 
     result = palCmdBegin(frame->cmdBuffer, nullptr);
     if (result != PAL_RESULT_SUCCESS) {
         logResult(result, "Failed to begin command buffer");
+        DEBUG_BREAK();
         return;
     }
 
@@ -232,6 +223,7 @@ void Renderer::endRendering()
     PalResult result = palCmdEnd(frame->cmdBuffer);
     if (result != PAL_RESULT_SUCCESS) {
         logResult(result, "Failed to end rendering");
+        DEBUG_BREAK();
         return;
     }
 
@@ -245,12 +237,14 @@ void Renderer::endRendering()
     result = palSubmitCommandBuffer(m_Queue, &submitInfo);
     if (result != PAL_RESULT_SUCCESS) {
         logResult(result, "Failed to submit command buffer");
+        DEBUG_BREAK();
         return;
     }
 
     result = palPresentSwapchain(m_Swapchain, m_ImageIndex, m_RenderFinishedSemaphore);
     if (result != PAL_RESULT_SUCCESS) {
         logResult(result, "Failed to present m_Swapchain");
+        DEBUG_BREAK();
         return;
     }
 
@@ -320,11 +314,13 @@ void Renderer::createDevice()
     PalResult result = palEnumerateAdapters(&count, nullptr);
     if (result != PAL_RESULT_SUCCESS) {
         logResult(result, "Failed to get adapters");
+        DEBUG_BREAK();
         return;
     }
 
     if (count == 0) {
         palLog(nullptr, "No adapters found");
+        DEBUG_BREAK();
         return;
     }
 
@@ -332,6 +328,7 @@ void Renderer::createDevice()
     adapters = (PalAdapter**)palAllocate(nullptr, sizeof(PalAdapter*) * count, 0);
     if (!adapters) {
         palLog(nullptr, "Failed to allocate memory");
+        DEBUG_BREAK();
         return;
     }
 
@@ -339,6 +336,7 @@ void Renderer::createDevice()
     if (result != PAL_RESULT_SUCCESS) {
         palFree(nullptr, adapters);
         logResult(result, "Failed to get adapters");
+        DEBUG_BREAK();
         return;
     }
 
@@ -373,6 +371,7 @@ void Renderer::createDevice()
     palFree(nullptr, adapters);
     if (!m_Adapter) {
         palLog(nullptr, "Failed to find a required adapter");
+        DEBUG_BREAK();
         return;
     }
 
@@ -381,6 +380,7 @@ void Renderer::createDevice()
     result = palCreateDevice(m_Adapter, features, &m_Device);
     if (result != PAL_RESULT_SUCCESS) {
         logResult(result, "Failed to create m_Device");
+        DEBUG_BREAK();
         return;
     }
 
@@ -415,6 +415,7 @@ void Renderer::createSwapchain(PalWindow* window)
 
     if (result != PAL_RESULT_SUCCESS) {
         logResult(result, "Failed to create surface");
+        DEBUG_BREAK();
         return;
     }
 
@@ -423,6 +424,7 @@ void Renderer::createSwapchain(PalWindow* window)
         result = palCreateQueue(m_Device, PAL_QUEUE_TYPE_GRAPHICS, &m_Queue);
         if (result != PAL_RESULT_SUCCESS) {
             logResult(result, "Failed to create queue");
+            DEBUG_BREAK();
             return;
         }
 
@@ -437,6 +439,7 @@ void Renderer::createSwapchain(PalWindow* window)
 
     if (!foundQueue) {
         palLog(nullptr, "Failed to find a queue that can present to the surface");
+        DEBUG_BREAK();
         return;
     }
 
@@ -466,6 +469,7 @@ void Renderer::createSwapchain(PalWindow* window)
         swapchainCreateInfo.imageCount++;
         if (surfaceCaps.maxImageCount < 2) {
             palLog(nullptr, "Surface does not support double buffers");
+            DEBUG_BREAK();
             return;
         }
     }
@@ -480,6 +484,7 @@ void Renderer::createSwapchain(PalWindow* window)
     if (result != PAL_RESULT_SUCCESS) {
         logResult(result, "Failed to create swapchain");
         palDestroySurface(m_Surface);
+        DEBUG_BREAK();
         return;
     }
 
@@ -503,6 +508,7 @@ void Renderer::createSwapchain(PalWindow* window)
         palLog(nullptr, "Failed to allocate memory");
         palDestroySwapchain(m_Swapchain);
         palDestroySurface(m_Surface);
+        DEBUG_BREAK();
         return;
     }
 
@@ -523,6 +529,7 @@ void Renderer::createSwapchain(PalWindow* window)
             palLog(nullptr, "Failed to get swapchain image");
             palDestroySwapchain(m_Swapchain);
             palDestroySurface(m_Surface);
+            DEBUG_BREAK();
             return;
         }
 
@@ -531,6 +538,7 @@ void Renderer::createSwapchain(PalWindow* window)
             logResult(result, "Failed to create image view");
             palDestroySwapchain(m_Swapchain);
             palDestroySurface(m_Surface);
+            DEBUG_BREAK();
             return;
         }
 
@@ -540,6 +548,7 @@ void Renderer::createSwapchain(PalWindow* window)
             logResult(result, "Failed to create semaphore");
             palDestroySwapchain(m_Swapchain);
             palDestroySurface(m_Surface);
+            DEBUG_BREAK();
             return;
         }
 
@@ -553,8 +562,8 @@ void Renderer::createPipeline()
 {
     const char* sources[2];
     if (m_ShaderFormats & PAL_SHADER_FORMAT_SPIRV) {
-        sources[0] = "assets/shaders/spirv/vertex_quad.glsl";
-        sources[1] = "assets/shaders/spirv/fragment_quad.glsl";
+        sources[0] = "assets/shaders/spirv/vertex_quad.spv";
+        sources[1] = "assets/shaders/spirv/fragment_quad.spv";
 
     } else if (m_ShaderFormats & PAL_SHADER_FORMAT_DXBC) {
         sources[0] = "assets/shaders/dxbc/vertex_quad.cso";
@@ -562,6 +571,7 @@ void Renderer::createPipeline()
 
     } else {
         palLog(nullptr, "Failed to find a supported shader format");
+        DEBUG_BREAK();
         return;
     }
 
@@ -570,6 +580,7 @@ void Renderer::createPipeline()
     for (int i = 0; i < 2; i++) {
         shaders[i] = createShader(sources[i], stages[i]);
         if (!shaders[i]) {
+            DEBUG_BREAK();
             return;
         }
     }
@@ -587,6 +598,7 @@ void Renderer::createPipeline()
 
     if (result != PAL_RESULT_SUCCESS) {
         logResult(result, "Failed to create pipeline layout");
+        DEBUG_BREAK();
         return;
     }
 
@@ -632,6 +644,7 @@ void Renderer::createPipeline()
     result = palCreateGraphicsPipeline(m_Device, &pipelineCreateInfo, &m_QuadPipeline);
     if (result != PAL_RESULT_SUCCESS) {
         logResult(result, "Failed to create graphics pipeline");
+        DEBUG_BREAK();
         return;
     }
 
@@ -646,6 +659,7 @@ void Renderer::createBuffers()
     uint32_t* indices = nullptr;
     indices = (uint32_t*)palAllocate(nullptr, sizeof(uint32_t) * MAX_INDICES, 0);
     if (!indices) {
+        DEBUG_BREAK();
         return;
     }
 
@@ -671,6 +685,7 @@ void Renderer::createBuffers()
         PalResult result = palCreateBuffer(m_Device, &createInfo, &frame->vertexBuffer);
         if (result != PAL_RESULT_SUCCESS) {
             logResult(result, "Failed to create buffer");
+            DEBUG_BREAK();
             return;
         }
 
@@ -680,6 +695,7 @@ void Renderer::createBuffers()
         result = palCreateBuffer(m_Device, &createInfo, &frame->uploadBuffer);
         if (result != PAL_RESULT_SUCCESS) {
             logResult(result, "Failed to create buffer");
+            DEBUG_BREAK();
             return;
         }
 
@@ -687,6 +703,7 @@ void Renderer::createBuffers()
         result = palMapBuffer(frame->uploadBuffer, 0, createInfo.size, &ptr);
         if (result != PAL_RESULT_SUCCESS) {
             logResult(result, "Failed to map buffer");
+            DEBUG_BREAK();
             return;
         }
 
@@ -701,46 +718,57 @@ void Renderer::createBuffers()
     PalResult result = palCreateBuffer(m_Device, &createInfo, &m_IndexBuffer);
     if (result != PAL_RESULT_SUCCESS) {
         logResult(result, "Failed to create buffer");
+        DEBUG_BREAK();
         return;
     }
 
     // create staging buffer for index buffer
-    PalBuffer* stagingBuffer = nullptr;
     createInfo.memoryUsage = PAL_BUFFER_MEMORY_USAGE_AUTO_CPU_UPLOAD;
     createInfo.usages = PAL_BUFFER_USAGE_TRANSFER_SRC;
     createInfo.size = sizeof(uint32_t) * MAX_INDICES;
 
-    result = palCreateBuffer(m_Device, &createInfo, &stagingBuffer);
+    result = palCreateBuffer(m_Device, &createInfo, &m_IndexStagingBuffer);
     if (result != PAL_RESULT_SUCCESS) {
         logResult(result, "Failed to create buffer");
+        DEBUG_BREAK();
         return;
     }
 
     // copy indices to staging buffer
     void* ptr = nullptr;
-    result = palMapBuffer(stagingBuffer, 0, createInfo.size, &ptr);
+    result = palMapBuffer(m_IndexStagingBuffer, 0, createInfo.size, &ptr);
     if (result != PAL_RESULT_SUCCESS) {
         logResult(result, "Failed to map buffer");
+        DEBUG_BREAK();
         return;
     }
 
     memcpy(ptr, indices, createInfo.size);
-    palUnmapBuffer(stagingBuffer);
+    palUnmapBuffer(m_IndexStagingBuffer);
 
     // copy staging buffer to index buffer
     result = palCmdBegin(m_Frames[0].cmdBuffer, nullptr);
     if (result != PAL_RESULT_SUCCESS) {
         logResult(result, "Failed to begin command buffer");
+        DEBUG_BREAK();
         return;
     }
 
     PalBufferCopyInfo copyInfo = {0};
     copyInfo.size = createInfo.size;
-    palCmdCopyBuffer(m_Frames[0].cmdBuffer, m_IndexBuffer, stagingBuffer, &copyInfo);
+    palCmdCopyBuffer(m_Frames[0].cmdBuffer, m_IndexBuffer, m_IndexStagingBuffer, &copyInfo);
 
     result = palCmdEnd(m_Frames[0].cmdBuffer);
     if (result != PAL_RESULT_SUCCESS) {
         logResult(result, "Failed to end command buffer");
+        DEBUG_BREAK();
+        return;
+    }
+
+    result = palResetFence(m_Frames[0].fence);
+    if (result != PAL_RESULT_SUCCESS) {
+        logResult(result, "Failed to reset fence");
+        DEBUG_BREAK();
         return;
     }
 
@@ -750,10 +778,10 @@ void Renderer::createBuffers()
     result = palSubmitCommandBuffer(m_Queue, &submitInfo);
     if (result != PAL_RESULT_SUCCESS) {
         logResult(result, "Failed to submit command buffer");
+        DEBUG_BREAK();
         return;
     }
 
-    palDestroyBuffer(stagingBuffer);
     palFree(nullptr, indices);
 }
 
@@ -762,6 +790,7 @@ void Renderer::createSyncObjects()
     PalResult result = palCreateCommandPool(m_Device, m_Queue, &m_CmdPool);
     if (result != PAL_RESULT_SUCCESS) {
         logResult(result, "Failed to create command pool");
+        DEBUG_BREAK();
         return;
     }
 
@@ -775,12 +804,14 @@ void Renderer::createSyncObjects()
 
         if (result != PAL_RESULT_SUCCESS) {
             logResult(result, "Failed to create semaphore");
+            DEBUG_BREAK();
             return;
         }
 
         result = palCreateFence(m_Device, PAL_TRUE, &frame->fence);
         if (result != PAL_RESULT_SUCCESS) {
             logResult(result, "Failed to create fence");
+            DEBUG_BREAK();
             return;
         }
 
@@ -792,6 +823,7 @@ void Renderer::createSyncObjects()
 
         if (result != PAL_RESULT_SUCCESS) {
             logResult(result, "Failed to allocate command buffer");
+            DEBUG_BREAK();
             return;
         }
     }
@@ -820,6 +852,7 @@ void Renderer::createDescriptorObjects()
 
     if (result != PAL_RESULT_SUCCESS) {
         logResult(result, "Failed to create descriptor set layout");
+        DEBUG_BREAK();
         return;
     }
 
@@ -831,6 +864,7 @@ void Renderer::createDescriptorObjects()
     result = palCreateDescriptorPool(m_Device, &poolCreateInfo, &m_DescriptorPool);
     if (result != PAL_RESULT_SUCCESS) {
         logResult(result, "Failed to create descriptor pool");
+        DEBUG_BREAK();
         return;
     }
 
@@ -842,6 +876,7 @@ void Renderer::createDescriptorObjects()
 
     if (result != PAL_RESULT_SUCCESS) {
         logResult(result, "Failed to allocate descriptor set");
+        DEBUG_BREAK();
         return;
     }
 }
@@ -857,22 +892,22 @@ void Renderer::resetBatch()
 void Renderer::flushBatch()
 {
     Frame* frame = &m_Frames[m_FrameIndex];
-    uint32_t dataSize = sizeof(Vertex) * frame->vertexCount;
-    PalBufferCopyInfo copyInfo = {0};
-    copyInfo.size = dataSize;
+    // uint32_t dataSize = sizeof(Vertex) * frame->vertexCount;
+    // PalBufferCopyInfo copyInfo = {0};
+    // copyInfo.size = dataSize;
 
-    palCmdCopyBuffer(
-        frame->cmdBuffer, 
-        frame->vertexBuffer, 
-        frame->uploadBuffer, 
-        &copyInfo);
+    // palCmdCopyBuffer(
+    //     frame->cmdBuffer, 
+    //     frame->vertexBuffer, 
+    //     frame->uploadBuffer, 
+    //     &copyInfo);
 
-    PalBarrierInfo barrierInfo = {0};
-    barrierInfo.oldState = PAL_USAGE_STATE_TRANSFER_WRITE;
-    barrierInfo.srcStages = PAL_PIPELINE_STAGE_TRANSFER;
-    barrierInfo.newState = PAL_USAGE_STATE_SHADER_READ;
-    barrierInfo.dstStages = PAL_PIPELINE_STAGE_VERTEX_SHADER;
+    // PalBarrierInfo barrierInfo = {0};
+    // barrierInfo.oldState = PAL_USAGE_STATE_TRANSFER_WRITE;
+    // barrierInfo.srcStages = PAL_PIPELINE_STAGE_TRANSFER;
+    // barrierInfo.newState = PAL_USAGE_STATE_SHADER_READ;
+    // barrierInfo.dstStages = PAL_PIPELINE_STAGE_VERTEX_SHADER;
 
-    palCmdBufferBarrier(frame->cmdBuffer, frame->vertexBuffer, &barrierInfo);
-    palCmdDrawIndexed(frame->cmdBuffer, frame->indexCount, 1, 0, 0, 0);
+    // palCmdBufferBarrier(frame->cmdBuffer, frame->vertexBuffer, &barrierInfo);
+    // palCmdDrawIndexed(frame->cmdBuffer, frame->indexCount, 1, 0, 0, 0);
 }
