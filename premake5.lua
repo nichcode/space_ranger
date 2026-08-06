@@ -197,7 +197,7 @@ local function writeLaunchConfiguration(file, isDebug)
     file:write('            "type": "cppdbg",\n')
     file:write('            "request": "launch",\n')
     file:write('            "stopAtEntry": false,\n')
-    file:write('            "cwd": ${workspaceFolder}",\n')
+    file:write('            "cwd": "${workspaceFolder}",\n')
 
     file:write('            "environment": [],\n')
     file:write('            "externalConsole": false,\n')
