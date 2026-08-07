@@ -1,8 +1,8 @@
 
 #include "pal2/pal_system.h"
 #include "renderer.h"
-#include "glm/glm.hpp"
 #include "helper.h"
+#include "glm/gtc/matrix_transform.hpp"
 
 #include <stdio.h>
 
@@ -85,6 +85,17 @@ void Renderer::initialize(PalWindow* window)
         DEBUG_BREAK();
         return;
     }
+
+    uint32_t w;
+    uint32_t h;
+    palGetWindowSize(window, &w, &h);
+
+    m_Viewport.width = (float)w;
+    m_Viewport.height = (float)h;
+    m_Viewport.maxDepth = 1.0f;
+
+    m_Scissor.width = w;
+    m_Scissor.height = h;
 }
 
 void Renderer::shutdown()
@@ -125,7 +136,7 @@ void Renderer::shutdown()
     palFree(nullptr, m_InFlightImages);
 }
 
-void Renderer::beginRendering(float r, float g, float b, float a)
+void Renderer::beginRendering(Camera* camera, const glm::vec4& clearColor)
 {
     Frame* frame = &m_Frames[m_FrameIndex];
 
@@ -188,10 +199,10 @@ void Renderer::beginRendering(float r, float g, float b, float a)
     palCmdImageBarrier(frame->cmdBuffer, image, &m_ImageRange, &barrierInfo);
 
     PalClearValue clearValue;
-    clearValue.color[0] = r;
-    clearValue.color[1] = g;
-    clearValue.color[2] = b;
-    clearValue.color[3] = a;
+    clearValue.color[0] = clearColor.r;
+    clearValue.color[1] = clearColor.g;
+    clearValue.color[2] = clearColor.b;
+    clearValue.color[3] = clearColor.a;
 
     PalAttachmentDesc colorAttachment = {0};
     colorAttachment.loadOp = PAL_LOAD_OP_CLEAR;
@@ -210,17 +221,22 @@ void Renderer::beginRendering(float r, float g, float b, float a)
 
     palCmdBeginRendering(frame->cmdBuffer, &renderingInfo);
     resetBatch();
+    m_Camera = camera;
 }
 
-void Renderer::drawQuad(float x, float y, Texture* texture)
+void Renderer::drawQuad(const glm::vec2& position, const glm::vec2& size, Texture* texture)
 {
     nextBatch();
     uint32_t textureIndex = getTextureIndex(texture);
     Frame* frame = &m_Frames[m_FrameIndex];
+
+    glm::mat4 transform = glm::mat4(1.0f);
+    glm::translate(transform, { -position, 0.0f });
+    glm::scale(transform, { size, 1.0f });
     
     for (int i = 0; i < 4; i++) {
         Vertex* quad = &frame->ptr[frame->offset + i];
-        // quad->pos = transform * s_Vertices[i];
+        quad->pos = transform * s_Vertices[i];
         quad->texIndex = textureIndex;
         quad->uv = s_TextureCoords[i];
     }
@@ -275,6 +291,12 @@ void Renderer::endRendering()
     }
 
     m_FrameIndex = (m_FrameIndex + 1) % MAX_FRAMES_IN_FLIGHT;
+}
+
+void Renderer::resize(uint32_t width, uint32_t height)
+{
+    // TODO: 
+
 }
 
 PalShader* Renderer::createShader(const char* path, PalShaderStage stage)
@@ -918,24 +940,36 @@ void Renderer::resetBatch()
 void Renderer::flushBatch()
 {
     Frame* frame = &m_Frames[m_FrameIndex];
-    // uint32_t dataSize = sizeof(Vertex) * frame->vertexCount;
-    // PalBufferCopyInfo copyInfo = {0};
-    // copyInfo.size = dataSize;
+    if (frame->vertexCount) {
+        uint32_t dataSize = sizeof(Vertex) * frame->vertexCount;
 
-    // palCmdCopyBuffer(
-    //     frame->cmdBuffer, 
-    //     frame->vertexBuffer, 
-    //     frame->uploadBuffer, 
-    //     &copyInfo);
+        PalBufferCopyInfo copyInfo = {0};
+        copyInfo.size = dataSize;
+        palCmdCopyBuffer(
+            frame->cmdBuffer, 
+            frame->vertexBuffer, 
+            frame->uploadBuffer, 
+            &copyInfo);
 
-    // PalBarrierInfo barrierInfo = {0};
-    // barrierInfo.oldState = PAL_USAGE_STATE_TRANSFER_WRITE;
-    // barrierInfo.srcStages = PAL_PIPELINE_STAGE_TRANSFER;
-    // barrierInfo.newState = PAL_USAGE_STATE_SHADER_READ;
-    // barrierInfo.dstStages = PAL_PIPELINE_STAGE_VERTEX_SHADER;
+        PalBarrierInfo barrierInfo = {0};
+        barrierInfo.oldState = PAL_USAGE_STATE_TRANSFER_WRITE;
+        barrierInfo.srcStages = PAL_PIPELINE_STAGE_TRANSFER;
+        barrierInfo.newState = PAL_USAGE_STATE_SHADER_READ;
+        barrierInfo.dstStages = PAL_PIPELINE_STAGE_VERTEX_SHADER;
 
-    // palCmdBufferBarrier(frame->cmdBuffer, frame->vertexBuffer, &barrierInfo);
-    // palCmdDrawIndexed(frame->cmdBuffer, frame->indexCount, 1, 0, 0, 0);
+        // TODO: update descriptor set
+
+        palCmdBufferBarrier(frame->cmdBuffer, frame->vertexBuffer, &barrierInfo);
+        palCmdBindPipeline(frame->cmdBuffer, m_QuadPipeline);
+        palCmdSetViewport(frame->cmdBuffer, 1, &m_Viewport);
+        palCmdSetScissors(frame->cmdBuffer, 1, &m_Scissor);
+
+        PushConstant pushConstant;
+        pushConstant.viewProjection = m_Camera->getViewProjectionMatrix();
+        palCmdPushConstants(frame->cmdBuffer, 0, sizeof(PushConstant), &pushConstant);
+        palCmdBindDescriptorSet(frame->cmdBuffer, 0, m_DescriptorSet);
+        palCmdDrawIndexed(frame->cmdBuffer, frame->indexCount, 1, 0, 0, 0);
+    }
 }
 
 void Renderer::nextBatch()

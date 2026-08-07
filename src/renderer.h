@@ -3,6 +3,7 @@
 
 #include "pal2/pal_graphics.h"
 #include "pal2/pal_video.h"
+#include "camera.h"
 
 #define MAX_FRAMES_IN_FLIGHT 2
 
@@ -26,9 +27,10 @@ public:
     void initialize(PalWindow* window); 
     void shutdown();
 
-    void beginRendering(float r, float g, float b, float a);
-    void drawQuad(float x, float y, Texture* texture);
+    void beginRendering(Camera* camera, const glm::vec4& clearColor);
+    void drawQuad(const glm::vec2& position, const glm::vec2& size, Texture* texture);
     void endRendering();
+    void resize(uint32_t width, uint32_t height);
 
 private:
     PalShader* createShader(const char* path, PalShaderStage stage);
@@ -75,4 +77,8 @@ private:
     uint32_t m_ImageIndex = 0;
     Frame m_Frames[MAX_FRAMES_IN_FLIGHT];
     PalImageSubresourceRange m_ImageRange;
+    Camera* m_Camera;
+
+    PalViewport m_Viewport;
+    PalRect2D m_Scissor;
 };
