@@ -12,9 +12,8 @@
 #define MAX_TEXTURE_SLOTS 16
 
 struct Vertex {
-    glm::vec3 pos;
+    glm::vec2 pos;
     glm::vec2 uv;
-    glm::vec4 color;
     uint32_t texIndex;
 };
 
@@ -218,11 +217,9 @@ void Renderer::drawQuad(float x, float y, Texture* texture)
     nextBatch();
     uint32_t textureIndex = getTextureIndex(texture);
     Frame* frame = &m_Frames[m_FrameIndex];
-
-    // TODO: make position vec2, remove color and build transform
+    
     for (int i = 0; i < 4; i++) {
         Vertex* quad = &frame->ptr[frame->offset + i];
-        quad->color = { 1.0f, 1.0f, 1.0f, 1.0f };
         // quad->pos = transform * s_Vertices[i];
         quad->texIndex = textureIndex;
         quad->uv = s_TextureCoords[i];
@@ -631,15 +628,14 @@ void Renderer::createPipeline()
         return;
     }
 
-    PalVertexAttribute attributes[4] = {
-        { PAL_VERTEX_SEMANTIC_ID_POSITION, PAL_VERTEX_TYPE_FLOAT3 },
+    PalVertexAttribute attributes[3] = {
+        { PAL_VERTEX_SEMANTIC_ID_POSITION, PAL_VERTEX_TYPE_FLOAT2 },
         { PAL_VERTEX_SEMANTIC_ID_TEXCOORD, PAL_VERTEX_TYPE_FLOAT2 },
-        { PAL_VERTEX_SEMANTIC_ID_COLOR, PAL_VERTEX_TYPE_FLOAT4 },
         { PAL_VERTEX_SEMANTIC_ID_TEXCOORD, PAL_VERTEX_TYPE_UINT32 } // TEXCOORD1
     };
 
     PalVertexLayout vertexLayout = {0};
-    vertexLayout.attributeCount = 4;
+    vertexLayout.attributeCount = 3;
     vertexLayout.attributes = attributes;
     vertexLayout.binding = 0;
     vertexLayout.type = PAL_VERTEX_LAYOUT_TYPE_PER_VERTEX;

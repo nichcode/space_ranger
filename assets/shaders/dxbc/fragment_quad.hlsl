@@ -9,12 +9,11 @@ struct PSInput
 {
     float4 pos : SV_POSITION;
     float2 uv : TEXCOORD;
-    float4 color : COLOR;
     nointerpolation uint textureIndex : TEXCOORD1;
 };
 
 float4 main(PSInput input) : SV_Target
 {
     uint index = (uint)input.textureIndex;
-    return input.color * textures[index].Sample(samp, input.uv);
+    return textures[index].Sample(samp, input.uv);
 }
