@@ -1,5 +1,6 @@
 
 #include "game.h"
+#include "asset_manager.h"
 #include "helper.h"
 
 bool Game::initialize()
@@ -24,6 +25,7 @@ bool Game::initialize()
     createInfo.height = WINDOW_HEIGHT;
     createInfo.show = PAL_TRUE;
     createInfo.title = "Space Ranger";
+    createInfo.style = PAL_WINDOW_STYLE_RESIZABLE;
 
     // check if we support decorated windows (title bar, close etc)
     PalVideoFeatures videoFeatures = palGetVideoFeatures();
@@ -45,7 +47,34 @@ bool Game::initialize()
         PAL_EVENT_TYPE_WINDOW_CLOSE, 
         PAL_DISPATCH_MODE_POLL);
 
+    palSetEventDispatchMode(
+        m_EventDriver, 
+        PAL_EVENT_TYPE_WINDOW_SIZE, 
+        PAL_DISPATCH_MODE_POLL);
+
+    palSetEventDispatchMode(
+        m_EventDriver, 
+        PAL_EVENT_TYPE_KEYDOWN, 
+        PAL_DISPATCH_MODE_POLL);
+
+    palSetEventDispatchMode(
+        m_EventDriver, 
+        PAL_EVENT_TYPE_KEYREPEAT, 
+        PAL_DISPATCH_MODE_POLL);
+
+    palSetEventDispatchMode(
+        m_EventDriver, 
+        PAL_EVENT_TYPE_KEYUP, 
+        PAL_DISPATCH_MODE_POLL);
+
     m_Renderer.initialize(m_Window);
+    AssetManager::initialize(&m_Renderer);
+    m_Player.initialize();
+
+    m_Camera.setPosition({ 0.0f, 0.0f });
+    m_Camera.setSize({ WORLD_WIDTH, WORLD_HEIGHT });
+    m_Camera.setRotation(0.0f);
+
     m_Running = true;
     return true;
 }
@@ -62,17 +91,27 @@ void Game::run()
                     m_Running = PAL_FALSE;
                     break;
                 }
+
+                case PAL_EVENT_TYPE_WINDOW_SIZE: {
+                    uint32_t width, height;
+                    palUnpackUint32(event.data, &width, &height);
+                    m_Renderer.resize(width, height);
+                }
             }
         }
 
-        m_Renderer.beginRendering(0.2f, 0.2f, 0.2f, 1.0f);
+        m_Renderer.beginRendering(&m_Camera, { 0.0f, 0.0f, 0.0f, 1.0f });
+        m_Player.render(&m_Renderer);
         m_Renderer.endRendering();
     }
 }
 
 void Game::shutdown()
 {
+    m_Player.destroy();
+    AssetManager::shutdown();
     m_Renderer.shutdown();
+
     palDestroyWindow(m_Window);
     palShutdownVideo();
     palDestroyEventDriver(m_EventDriver);

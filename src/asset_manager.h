@@ -17,7 +17,7 @@ private:
 
 class AssetManager {
 public:
-    static void initialize(PalDevice* device);
+    static void initialize(Renderer* renderer);
     static void shutdown();
     static Texture* loadTexture(const char* path);
     static void destroyTexture(Texture* texture);

@@ -2,6 +2,7 @@
 #include "pal2/pal_system.h"
 #include "renderer.h"
 #include "helper.h"
+#include "asset_manager.h"
 #include "glm/gtc/matrix_transform.hpp"
 
 #include <stdio.h>
@@ -10,6 +11,8 @@
 #define MAX_VERTICES MAX_QUADS * 4
 #define MAX_INDICES MAX_QUADS * 6
 #define MAX_TEXTURE_SLOTS 16
+
+#define min(a, b) (a < b) ? a : b
 
 struct Vertex {
     glm::vec2 pos;
@@ -23,7 +26,7 @@ struct PushConstant {
 
 static glm::vec4 s_Vertices[4];
 static glm::vec2 s_TextureCoords[4];
-static Texture* s_TextureSlots[MAX_TEXTURE_SLOTS];
+static PalDescriptorImageViewInfo s_TextureSlots[MAX_TEXTURE_SLOTS];
 static uint32_t s_TextureSlotIndex = 0;
 
 static void PAL_CALL onGraphicsDebug(
@@ -96,6 +99,43 @@ void Renderer::initialize(PalWindow* window)
 
     m_Scissor.width = w;
     m_Scissor.height = h;
+
+    PalSamplerCreateInfo samplerCreateInfo = {0};
+    samplerCreateInfo.addressModeU = PAL_SAMPLER_ADDRESS_MODE_REPEAT;
+    samplerCreateInfo.addressModeV = PAL_SAMPLER_ADDRESS_MODE_REPEAT;
+    samplerCreateInfo.addressModeW = PAL_SAMPLER_ADDRESS_MODE_REPEAT;
+    samplerCreateInfo.borderColor = PAL_BORDER_COLOR_INT_OPAQUE_BLACK;
+
+    samplerCreateInfo.compareOp = PAL_COMPARE_OP_NEVER;
+    samplerCreateInfo.enableAnisotropy = PAL_FALSE;
+    samplerCreateInfo.enableCompare = PAL_FALSE;
+    samplerCreateInfo.magFilterMode = PAL_FILTER_MODE_LINEAR;
+
+    samplerCreateInfo.maxAnisotropy = 1.0f;
+    samplerCreateInfo.minFilterMode = PAL_FILTER_MODE_LINEAR;
+    result = palCreateSampler(m_Device, &samplerCreateInfo, &m_Sampler);
+    if (result != PAL_RESULT_SUCCESS) {
+        logResult(result, "Failed to create sampler");
+        DEBUG_BREAK();
+        return;
+    }
+
+    PalDescriptorSamplerInfo samplerInfo = {0};
+    samplerInfo.sampler = m_Sampler;
+
+    PalDescriptorSetWriteInfo writeInfo = {0};
+    writeInfo.descriptorCount = 1;
+    writeInfo.descriptorSet = m_DescriptorSet;
+    writeInfo.descriptorType = PAL_DESCRIPTOR_TYPE_SAMPLER;
+    writeInfo.layoutBindingIndex = 1;
+
+    writeInfo.samplerInfos = &samplerInfo;
+    result = palUpdateDescriptorSet(m_Device, 1, &writeInfo);
+    if (result != PAL_RESULT_SUCCESS) {
+        logResult(result, "Failed to update descriptor set");
+        DEBUG_BREAK();
+        return;
+    }
 }
 
 void Renderer::shutdown()
@@ -116,7 +156,8 @@ void Renderer::shutdown()
         palDestroySemaphore(m_RenderFinishedSemaphores[i]);
         palDestroyImageView(m_ImageViews[i]);
     }
-    
+
+    palDestroySampler(m_Sampler);
     palDestroyPipeline(m_QuadPipeline);
     palDestroyPipelineLayout(m_PipelineLayout);
     palDestroyDescriptorPool(m_DescriptorPool);
@@ -221,7 +262,7 @@ void Renderer::beginRendering(Camera* camera, const glm::vec4& clearColor)
 
     palCmdBeginRendering(frame->cmdBuffer, &renderingInfo);
     resetBatch();
-    m_Camera = camera;
+    m_Projection = camera->getViewProjectionMatrix();
 }
 
 void Renderer::drawQuad(const glm::vec2& position, const glm::vec2& size, Texture* texture)
@@ -295,8 +336,19 @@ void Renderer::endRendering()
 
 void Renderer::resize(uint32_t width, uint32_t height)
 {
-    // TODO: 
+    float scaleX = (float)width / WORLD_WIDTH;
+    float scaleY = (float)height / WORLD_HEIGHT;
+    float scale = min(scaleX, scaleY);
 
+    m_Viewport.width = WORLD_WIDTH * scale;
+    m_Viewport.height = WORLD_HEIGHT * scale;
+    m_Viewport.x = ((float)width - m_Viewport.width) * 0.5f;
+    m_Viewport.y = ((float)height - m_Viewport.height) * 0.5f;
+
+    m_Scissor.x = (uint32_t)m_Viewport.x;
+    m_Scissor.y = (uint32_t)m_Viewport.y;
+    m_Scissor.width = (uint32_t)m_Viewport.width;
+    m_Scissor.height = (uint32_t)m_Viewport.height;
 }
 
 PalShader* Renderer::createShader(const char* path, PalShaderStage stage)
@@ -957,7 +1009,19 @@ void Renderer::flushBatch()
         barrierInfo.newState = PAL_USAGE_STATE_SHADER_READ;
         barrierInfo.dstStages = PAL_PIPELINE_STAGE_VERTEX_SHADER;
 
-        // TODO: update descriptor set
+        PalDescriptorSetWriteInfo writeInfo = {0};
+        writeInfo.descriptorCount = s_TextureSlotIndex;
+        writeInfo.descriptorSet = m_DescriptorSet;
+        writeInfo.descriptorType = PAL_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+        writeInfo.layoutBindingIndex = 1;     
+        
+        writeInfo.imageViewInfos = s_TextureSlots;
+        PalResult result = palUpdateDescriptorSet(m_Device, 1, &writeInfo);
+        if (result != PAL_RESULT_SUCCESS) {
+            logResult(result, "Failed to update descriptor set");
+            DEBUG_BREAK();
+            return;
+        }
 
         palCmdBufferBarrier(frame->cmdBuffer, frame->vertexBuffer, &barrierInfo);
         palCmdBindPipeline(frame->cmdBuffer, m_QuadPipeline);
@@ -965,7 +1029,7 @@ void Renderer::flushBatch()
         palCmdSetScissors(frame->cmdBuffer, 1, &m_Scissor);
 
         PushConstant pushConstant;
-        pushConstant.viewProjection = m_Camera->getViewProjectionMatrix();
+        pushConstant.viewProjection = m_Projection;
         palCmdPushConstants(frame->cmdBuffer, 0, sizeof(PushConstant), &pushConstant);
         palCmdBindDescriptorSet(frame->cmdBuffer, 0, m_DescriptorSet);
         palCmdDrawIndexed(frame->cmdBuffer, frame->indexCount, 1, 0, 0, 0);
@@ -988,13 +1052,13 @@ uint32_t Renderer::getTextureIndex(Texture* texture)
     }
 
     for (uint32_t i = 0; i < s_TextureSlotIndex; i++) {
-        if (s_TextureSlots[i] == texture) {
+        if (s_TextureSlots[i].imageView == texture->imageView) {
             return i; 
         }
     }
 
     nextBatch();
     uint32_t index = s_TextureSlotIndex++;
-    s_TextureSlots[index] = texture;
+    s_TextureSlots[index].imageView = texture->imageView;
     return index;
 }

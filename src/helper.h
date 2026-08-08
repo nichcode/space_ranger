@@ -5,6 +5,8 @@
 
 #define WINDOW_WIDTH 640
 #define WINDOW_HEIGHT 480
+#define WORLD_WIDTH 1280.0f
+#define WORLD_HEIGHT 720.0f
 
 #if defined(_MSC_VER)
 #define DEBUG_BREAK() __debugbreak()

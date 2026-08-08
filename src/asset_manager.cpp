@@ -1,5 +1,6 @@
 
 #include "asset_manager.h"
+#include "renderer.h"
 #include "helper.h"
 
 #define STB_IMAGE_IMPLEMENTATION
@@ -18,8 +19,10 @@ struct Data {
 
 static Data s_Data;
 
-void AssetManager::initialize(PalDevice* device)
+void AssetManager::initialize(Renderer* renderer)
 {
+    PalDevice* device = renderer->m_Device;
+
     PalResult result = palCreateQueue(device, PAL_QUEUE_TYPE_COPY, &s_Data.queue);
     if (result != PAL_RESULT_SUCCESS) {
         logResult(result, "Failed to create queue");
@@ -233,4 +236,5 @@ void AssetManager::destroyTexture(Texture* texture)
 {
     palDestroyImageView(texture->imageView);
     palDestroyImage(texture->image);
+    palFree(nullptr, texture);
 }

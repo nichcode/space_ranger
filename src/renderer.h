@@ -9,6 +9,7 @@
 
 struct Vertex;
 struct Texture;
+class AssetManager;
 
 struct Frame {
     uint32_t vertexCount;
@@ -23,6 +24,7 @@ struct Frame {
 };
 
 class Renderer {
+    friend class AssetManager;
 public:
     void initialize(PalWindow* window); 
     void shutdown();
@@ -77,8 +79,9 @@ private:
     uint32_t m_ImageIndex = 0;
     Frame m_Frames[MAX_FRAMES_IN_FLIGHT];
     PalImageSubresourceRange m_ImageRange;
-    Camera* m_Camera;
+    glm::mat4 m_Projection;
 
+    PalSampler* m_Sampler;
     PalViewport m_Viewport;
     PalRect2D m_Scissor;
 };
