@@ -13,6 +13,9 @@ public:
     void run();
 
 private:
+    void createDevice();
+
+private:
     bool m_Running;
     PalWindow* m_Window;
     PalEventDriver* m_EventDriver;

@@ -13,12 +13,23 @@ bool Game::initialize()
         return false;
     }
 
+    result = palInitGraphics(nullptr, nullptr, 0, nullptr);
+    if (result != PAL_RESULT_SUCCESS) {
+        logResult(result, "Failed to initialize graphics");
+        DEBUG_BREAK();
+        return false;
+    }
+
+    // find an adapter and 
+
     result = palInitVideo(nullptr, m_EventDriver, nullptr);
     if (result != PAL_RESULT_SUCCESS) {
         logResult(result, "Failed to initialize video");
         DEBUG_BREAK();
         return false;
     }
+
+    // create threads for renderer and assets manager
 
     PalWindowCreateInfo createInfo = {0};
     createInfo.width = WINDOW_WIDTH;
@@ -67,15 +78,15 @@ bool Game::initialize()
         PAL_EVENT_TYPE_KEYUP, 
         PAL_DISPATCH_MODE_POLL);
 
-    m_Renderer.initialize(m_Window);
-    AssetManager::initialize(&m_Renderer);
-    m_Player.initialize();
+    // m_Renderer.initialize(m_Window);
+    // AssetManager::initialize(&m_Renderer);
+    // m_Player.initialize();
 
-    m_Camera.setPosition({ 0.0f, 0.0f });
-    m_Camera.setSize({ WORLD_WIDTH, WORLD_HEIGHT });
-    m_Camera.setRotation(0.0f);
+    // m_Camera.setPosition({ 0.0f, 0.0f });
+    // m_Camera.setSize({ WORLD_WIDTH, WORLD_HEIGHT });
+    // m_Camera.setRotation(0.0f);
 
-    m_Running = true;
+    // m_Running = true;
     return true;
 }
 
@@ -95,24 +106,29 @@ void Game::run()
                 case PAL_EVENT_TYPE_WINDOW_SIZE: {
                     uint32_t width, height;
                     palUnpackUint32(event.data, &width, &height);
-                    m_Renderer.resize(width, height);
+                    // m_Renderer.resize(width, height);
                 }
             }
         }
 
-        m_Renderer.beginRendering(&m_Camera, { 0.0f, 0.0f, 0.0f, 1.0f });
-        m_Player.render(&m_Renderer);
-        m_Renderer.endRendering();
+        // m_Renderer.beginRendering(&m_Camera, { 0.0f, 0.0f, 0.0f, 1.0f });
+        // m_Player.render(&m_Renderer);
+        // m_Renderer.endRendering();
     }
 }
 
 void Game::shutdown()
 {
-    m_Player.destroy();
-    AssetManager::shutdown();
-    m_Renderer.shutdown();
-
+    // m_Player.destroy();
+    // AssetManager::shutdown();
+    // m_Renderer.shutdown();
     palDestroyWindow(m_Window);
     palShutdownVideo();
     palDestroyEventDriver(m_EventDriver);
+    palShutdownGraphics();
+}
+
+void Game::createDevice()
+{
+
 }
