@@ -29,28 +29,510 @@ static glm::vec2 s_TextureCoords[4];
 static PalDescriptorImageViewInfo s_TextureSlots[MAX_TEXTURE_SLOTS];
 static uint32_t s_TextureSlotIndex = 0;
 
-static void PAL_CALL onGraphicsDebug(
-    void* userData,
-    PalDebugMessageSeverity severity,
-    PalDebugMessageType type,
-    const char* msg)
+bool Renderer::initialize(
+    PalWindow* window, 
+    PalAdapter* adapter, 
+    PalDevice* device, 
+    uint32_t windowWidth, 
+    uint32_t windowHeight)
 {
-    palLog(nullptr, msg);
-}
+    memset(m_Frames, 0, sizeof(Frame) * MAX_FRAMES_IN_FLIGHT);
+    m_Device = device;
 
-void Renderer::initialize(PalWindow* window)
-{
-    PalGraphicsDebugger debugger = {0};
-    debugger.callback = onGraphicsDebug;
+    PalPlatformInfo platformInfo = {0};
+    PalWindowHandleInfo winHandle = {0};
+    palGetWindowHandleInfo(window, &winHandle);
+    palGetPlatformInfo(&platformInfo);
 
-    PalResult result = palInitGraphics(&debugger, nullptr, 0, nullptr);
-    if (result != PAL_RESULT_SUCCESS) {
-        logResult(result, "Failed to initialize graphics");
-        DEBUG_BREAK();
-        return;
+    PalAdapterCapabilities adapterCaps = {};
+    PalAdapterInfo adapterInfo = {};
+    palGetAdapterInfo(adapter, &adapterInfo);
+    palGetAdapterCapabilities(adapter, &adapterCaps);
+
+    PalWindowInstanceType windowInstanceType = PAL_WINDOW_INSTANCE_TYPE_XCB;
+    if (platformInfo.apiType == PAL_PLATFORM_API_TYPE_WAYLAND) {
+        windowInstanceType = PAL_WINDOW_INSTANCE_TYPE_WAYLAND;
+
+    } else if (platformInfo.apiType == PAL_PLATFORM_API_TYPE_X11) {
+        windowInstanceType = PAL_WINDOW_INSTANCE_TYPE_X11;
+
+    } else if (platformInfo.apiType == PAL_PLATFORM_API_TYPE_WIN32) {
+        windowInstanceType = PAL_WINDOW_INSTANCE_TYPE_WIN32;
     }
 
-    memset(m_Frames, 0, sizeof(Frame) * MAX_FRAMES_IN_FLIGHT);
+    PalResult result = palCreateSurface(
+        device,
+        winHandle.nativeWindow,
+        winHandle.nativeInstance,
+        windowInstanceType,
+        &m_Surface);
+
+    if (result != PAL_RESULT_SUCCESS) {
+        logResult(result, "Failed to create surface");
+        DEBUG_BREAK();
+        return false;
+    }
+
+    PalBool foundQueue = PAL_FALSE;
+    for (int i = 0; i < adapterCaps.maxGraphicsQueues; i++) {
+        result = palCreateQueue(device, PAL_QUEUE_TYPE_GRAPHICS, &m_Queue);
+        if (result != PAL_RESULT_SUCCESS) {
+            logResult(result, "Failed to create queue");
+            DEBUG_BREAK();
+            return false;
+        }
+
+        if (!palCanQueuePresent(m_Queue, m_Surface)) {
+            palDestroyQueue(m_Queue);
+
+        } else {
+            // found a queue
+            foundQueue = PAL_TRUE;
+            break;
+        }
+    }
+
+    if (!foundQueue) {
+        palLog(nullptr, "Failed to find a queue that can present to the surface");
+        DEBUG_BREAK();
+        return false;
+    }
+
+    PalSurfaceCapabilities surfaceCaps = {0};
+    palGetSurfaceCapabilities(device, m_Surface, &surfaceCaps);
+
+    PalSwapchainCreateInfo swapchainCreateInfo = {0};
+    swapchainCreateInfo.clipped = PAL_TRUE;
+    swapchainCreateInfo.compositeAlpha = PAL_COMPOSITE_ALPHA_OPAQUE;
+    swapchainCreateInfo.height = windowWidth;
+    swapchainCreateInfo.width = windowHeight;
+    swapchainCreateInfo.imageArrayLayerCount = 1;
+    swapchainCreateInfo.presentMode = PAL_PRESENT_MODE_FIFO;
+    swapchainCreateInfo.format = PAL_SURFACE_FORMAT_BGRA8_UNORM_SRGB_NONLINEAR;
+
+    // rare but possible on andriod
+    if (windowWidth > surfaceCaps.maxImageWidth) {
+        swapchainCreateInfo.width = surfaceCaps.maxImageWidth / 2;
+    }
+
+    if (windowHeight > surfaceCaps.maxImageHeight) {
+        swapchainCreateInfo.height = surfaceCaps.maxImageHeight / 2;
+    }
+
+    swapchainCreateInfo.imageCount = surfaceCaps.minImageCount;
+    if (swapchainCreateInfo.imageCount == 1) {
+        swapchainCreateInfo.imageCount++;
+        if (surfaceCaps.maxImageCount < 2) {
+            palLog(nullptr, "Surface does not support double buffers");
+            DEBUG_BREAK();
+            return false;
+        }
+    }
+
+    result = palCreateSwapchain(
+        device, 
+        m_Queue, 
+        m_Surface, 
+        &swapchainCreateInfo, 
+        &m_Swapchain);
+
+    if (result != PAL_RESULT_SUCCESS) {
+        logResult(result, "Failed to create swapchain");
+        palDestroySurface(m_Surface);
+        DEBUG_BREAK();
+        return false;
+    }
+
+    m_ImageCount = swapchainCreateInfo.imageCount;
+    m_ImageViews = (PalImageView**)palAllocate(
+        nullptr, 
+        sizeof(PalImageView*) * m_ImageCount, 
+        0);
+
+    m_InFlightImages = (PalFence**)palAllocate(
+        nullptr, 
+        sizeof(PalFence*) * m_ImageCount, 
+        0);
+
+    m_RenderFinishedSemaphores = (PalSemaphore**)palAllocate(
+        nullptr, 
+        sizeof(PalSemaphore*) * m_ImageCount, 
+        0);
+
+    if (!m_ImageViews || !m_InFlightImages || !m_RenderFinishedSemaphores) {
+        palLog(nullptr, "Failed to allocate memory");
+        palDestroySwapchain(m_Swapchain);
+        palDestroySurface(m_Surface);
+        DEBUG_BREAK();
+        return false;
+    }
+
+    PalImageInfo imageInfo;
+    palGetImageInfo(palGetSwapchainImage(m_Swapchain, 0), &imageInfo);
+
+    PalImageViewCreateInfo imageViewCreateInfo = {0};
+    imageViewCreateInfo.type = PAL_IMAGE_VIEW_TYPE_2D;
+    imageViewCreateInfo.subresourceRange.layerArrayCount = 1;
+    imageViewCreateInfo.subresourceRange.mipLevelCount = 1;
+    imageViewCreateInfo.subresourceRange.startArrayLayer = 0;
+    imageViewCreateInfo.subresourceRange.startMipLevel = 0;
+    imageViewCreateInfo.format = imageInfo.format;
+
+    for (int i = 0; i < m_ImageCount; i++) {
+        PalImage* image = palGetSwapchainImage(m_Swapchain, i);
+        if (!image) {
+            palLog(nullptr, "Failed to get swapchain image");
+            palDestroySwapchain(m_Swapchain);
+            palDestroySurface(m_Surface);
+            DEBUG_BREAK();
+            return false;
+        }
+
+        result = palCreateImageView(device, image, &imageViewCreateInfo, &m_ImageViews[i]);
+        if (result != PAL_RESULT_SUCCESS) {
+            logResult(result, "Failed to create image view");
+            palDestroySwapchain(m_Swapchain);
+            palDestroySurface(m_Surface);
+            DEBUG_BREAK();
+            return false;
+        }
+
+        // create render finished semaphores
+        result = palCreateSemaphore(device, PAL_FALSE, &m_RenderFinishedSemaphores[i]);
+        if (result != PAL_RESULT_SUCCESS) {
+            logResult(result, "Failed to create semaphore");
+            palDestroySwapchain(m_Swapchain);
+            palDestroySurface(m_Surface);
+            DEBUG_BREAK();
+            return false;
+        }
+
+        m_InFlightImages[i] = nullptr;
+    }
+
+    result = palCreateCommandPool(device, m_Queue, &m_CmdPool);
+    if (result != PAL_RESULT_SUCCESS) {
+        logResult(result, "Failed to create command pool");
+        DEBUG_BREAK();
+        return false;
+    }
+
+    for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+        Frame* frame = &m_Frames[i];
+
+        result = palCreateSemaphore(
+            device, 
+            PAL_FALSE, 
+            &frame->semaphore);
+
+        if (result != PAL_RESULT_SUCCESS) {
+            logResult(result, "Failed to create semaphore");
+            DEBUG_BREAK();
+            return false;
+        }
+
+        result = palCreateFence(device, PAL_TRUE, &frame->fence);
+        if (result != PAL_RESULT_SUCCESS) {
+            logResult(result, "Failed to create fence");
+            DEBUG_BREAK();
+            return false;
+        }
+
+        result = palAllocateCommandBuffer(
+            device,
+            m_CmdPool,
+            PAL_COMMAND_BUFFER_TYPE_PRIMARY,
+            &frame->cmdBuffer);
+
+        if (result != PAL_RESULT_SUCCESS) {
+            logResult(result, "Failed to allocate command buffer");
+            DEBUG_BREAK();
+            return false;
+        }
+    }
+
+    PalDescriptorSetLayoutBinding bindings[2] = {
+        { 16, PAL_DESCRIPTOR_TYPE_SAMPLED_IMAGE },
+        { 1, PAL_DESCRIPTOR_TYPE_SAMPLER }
+    };
+
+    PalDescriptorPoolBindingSize bindingSizes[2] = {
+        { 16, PAL_DESCRIPTOR_TYPE_SAMPLED_IMAGE },
+        { 1, PAL_DESCRIPTOR_TYPE_SAMPLER }
+    };
+
+    PalDescriptorSetLayoutCreateInfo layoutCreateInfo = {0};
+    layoutCreateInfo.bindingCount = 2;
+    layoutCreateInfo.bindings = bindings;
+
+    result = palCreateDescriptorSetLayout(
+        device, 
+        &layoutCreateInfo, 
+        &m_DescriptorSetLayout);
+
+    if (result != PAL_RESULT_SUCCESS) {
+        logResult(result, "Failed to create descriptor set layout");
+        DEBUG_BREAK();
+        return false;
+    }
+
+    PalDescriptorPoolCreateInfo poolCreateInfo = {0};
+    poolCreateInfo.bindingSizeCount = 2;
+    poolCreateInfo.bindingSizes = bindingSizes;
+    poolCreateInfo.maxDescriptorSets = 1;
+
+    result = palCreateDescriptorPool(device, &poolCreateInfo, &m_DescriptorPool);
+    if (result != PAL_RESULT_SUCCESS) {
+        logResult(result, "Failed to create descriptor pool");
+        DEBUG_BREAK();
+        return false;
+    }
+
+    result = palAllocateDescriptorSet(
+        device, 
+        m_DescriptorPool, 
+        m_DescriptorSetLayout, 
+        &m_DescriptorSet);
+
+    if (result != PAL_RESULT_SUCCESS) {
+        logResult(result, "Failed to allocate descriptor set");
+        DEBUG_BREAK();
+        return false;
+    }
+
+    const char* sources[2];
+    if (adapterInfo.shaderFormats & PAL_SHADER_FORMAT_SPIRV) {
+        sources[0] = "assets/shaders/spirv/vertex_quad.spv";
+        sources[1] = "assets/shaders/spirv/fragment_quad.spv";
+
+    } else if (adapterInfo.shaderFormats & PAL_SHADER_FORMAT_DXBC) {
+        sources[0] = "assets/shaders/dxbc/vertex_quad.cso";
+        sources[1] = "assets/shaders/dxbc/fragment_quad.cso";
+
+    } else {
+        palLog(nullptr, "Failed to find a supported shader format");
+        DEBUG_BREAK();
+        return false;
+    }
+
+    PalShader* shaders[2];
+    PalShaderStage stages[2] = { PAL_SHADER_STAGE_VERTEX, PAL_SHADER_STAGE_FRAGMENT };
+    for (int i = 0; i < 2; i++) {
+        shaders[i] = createShader(sources[i], stages[i], adapterInfo.shaderFormats);
+        if (!shaders[i]) {
+            DEBUG_BREAK();
+            return false;
+        }
+    }
+
+    PalPipelineLayoutCreateInfo pipelineLayoutCreateInfo = {0};
+    pipelineLayoutCreateInfo.descriptorSetLayoutCount = 1;
+    pipelineLayoutCreateInfo.descriptorSetLayouts = &m_DescriptorSetLayout;
+    pipelineLayoutCreateInfo.usePushConstant = PAL_TRUE;
+    pipelineLayoutCreateInfo.pushConstantInfo.size = sizeof(PushConstant);
+
+    result = palCreatePipelineLayout(
+        device, 
+        &pipelineLayoutCreateInfo, 
+        &m_PipelineLayout);
+
+    if (result != PAL_RESULT_SUCCESS) {
+        logResult(result, "Failed to create pipeline layout");
+        DEBUG_BREAK();
+        return false;
+    }
+
+    PalVertexAttribute attributes[3] = {
+        { PAL_VERTEX_SEMANTIC_ID_POSITION, PAL_VERTEX_TYPE_FLOAT2 },
+        { PAL_VERTEX_SEMANTIC_ID_TEXCOORD, PAL_VERTEX_TYPE_FLOAT2 },
+        { PAL_VERTEX_SEMANTIC_ID_TEXCOORD, PAL_VERTEX_TYPE_UINT32 } // TEXCOORD1
+    };
+
+    PalVertexLayout vertexLayout = {0};
+    vertexLayout.attributeCount = 3;
+    vertexLayout.attributes = attributes;
+    vertexLayout.binding = 0;
+    vertexLayout.type = PAL_VERTEX_LAYOUT_TYPE_PER_VERTEX;
+
+    PalRenderingLayoutInfo renderingLayoutInfo = {0};
+    renderingLayoutInfo.colorAttachentCount = 1;
+    renderingLayoutInfo.colorAttachmentsFormat = &imageInfo.format;
+    renderingLayoutInfo.sampleCount = PAL_SAMPLE_COUNT_1;
+    renderingLayoutInfo.viewCount = 1;
+
+    // color blend attachment
+    PalColorBlendAttachment blendAttachment = {0};
+    blendAttachment.colorWriteMask |= PAL_COLOR_MASK_RED;
+    blendAttachment.colorWriteMask |= PAL_COLOR_MASK_GREEN;
+    blendAttachment.colorWriteMask |= PAL_COLOR_MASK_BLUE;
+    blendAttachment.colorWriteMask |= PAL_COLOR_MASK_ALPHA;
+
+    PalGraphicsPipelineCreateInfo pipelineCreateInfo = {0};
+    pipelineCreateInfo.colorBlendAttachmentCount = 1;
+    pipelineCreateInfo.colorBlendAttachments = &blendAttachment;
+    pipelineCreateInfo.pipelineLayout = m_PipelineLayout;
+
+    pipelineCreateInfo.renderingLayout = &renderingLayoutInfo;
+    pipelineCreateInfo.topology = PAL_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+    pipelineCreateInfo.vertexLayoutCount = 1;
+    pipelineCreateInfo.vertexLayouts = &vertexLayout;
+
+    pipelineCreateInfo.shaders = shaders;
+    pipelineCreateInfo.shaderCount = 2;
+
+    result = palCreateGraphicsPipeline(device, &pipelineCreateInfo, &m_QuadPipeline);
+    if (result != PAL_RESULT_SUCCESS) {
+        logResult(result, "Failed to create graphics pipeline");
+        DEBUG_BREAK();
+        return false;
+    }
+
+    for (int i = 0; i < 2; i++) {
+        palDestroyShader(shaders[i]);
+    }
+
+    // build indices
+    uint32_t* indices = nullptr;
+    indices = (uint32_t*)palAllocate(nullptr, sizeof(uint32_t) * MAX_INDICES, 0);
+    if (!indices) {
+        DEBUG_BREAK();
+        return false;
+    }
+
+    for (int i = 0; i < MAX_QUADS; i++) {
+        uint32_t offset = i * 4;
+
+        indices[i * 6 + 0] = offset + 0;
+        indices[i * 6 + 1] = offset + 1;
+        indices[i * 6 + 2] = offset + 2;
+
+        indices[i * 6 + 3] = offset + 2;
+        indices[i * 6 + 4] = offset + 3;
+        indices[i * 6 + 5] = offset + 0;
+    }
+
+    PalBufferCreateInfo createInfo = {0};
+    for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+        Frame* frame = &m_Frames[i];
+
+        createInfo.memoryUsage = PAL_BUFFER_MEMORY_USAGE_AUTO_GPU_ONLY;
+        createInfo.usages = PAL_BUFFER_USAGE_VERTEX | PAL_BUFFER_USAGE_TRANSFER_DST;
+        createInfo.size = sizeof(Vertex) * MAX_VERTICES;
+        PalResult result = palCreateBuffer(device, &createInfo, &frame->vertexBuffer);
+        if (result != PAL_RESULT_SUCCESS) {
+            logResult(result, "Failed to create buffer");
+            DEBUG_BREAK();
+            return false;
+        }
+
+        // create upload buffer
+        createInfo.memoryUsage = PAL_BUFFER_MEMORY_USAGE_AUTO_CPU_UPLOAD;
+        createInfo.usages = PAL_BUFFER_USAGE_TRANSFER_SRC;
+        result = palCreateBuffer(device, &createInfo, &frame->uploadBuffer);
+        if (result != PAL_RESULT_SUCCESS) {
+            logResult(result, "Failed to create buffer");
+            DEBUG_BREAK();
+            return false;
+        }
+
+        void* ptr = nullptr;
+        result = palMapBuffer(frame->uploadBuffer, 0, createInfo.size, &ptr);
+        if (result != PAL_RESULT_SUCCESS) {
+            logResult(result, "Failed to map buffer");
+            DEBUG_BREAK();
+            return false;
+        }
+
+        frame->ptr = (Vertex*)ptr;
+    }
+
+    // create index buffer
+    createInfo.memoryUsage = PAL_BUFFER_MEMORY_USAGE_AUTO_GPU_ONLY;
+    createInfo.usages = PAL_BUFFER_USAGE_INDEX | PAL_BUFFER_USAGE_TRANSFER_DST;
+    createInfo.size = sizeof(uint32_t) * MAX_INDICES;
+
+    result = palCreateBuffer(device, &createInfo, &m_IndexBuffer);
+    if (result != PAL_RESULT_SUCCESS) {
+        logResult(result, "Failed to create buffer");
+        DEBUG_BREAK();
+        return false;
+    }
+
+    // create staging buffer for index buffer
+    createInfo.memoryUsage = PAL_BUFFER_MEMORY_USAGE_AUTO_CPU_UPLOAD;
+    createInfo.usages = PAL_BUFFER_USAGE_TRANSFER_SRC;
+    createInfo.size = sizeof(uint32_t) * MAX_INDICES;
+
+    result = palCreateBuffer(device, &createInfo, &m_IndexStagingBuffer);
+    if (result != PAL_RESULT_SUCCESS) {
+        logResult(result, "Failed to create buffer");
+        DEBUG_BREAK();
+        return false;
+    }
+
+    // copy indices to staging buffer
+    void* ptr = nullptr;
+    result = palMapBuffer(m_IndexStagingBuffer, 0, createInfo.size, &ptr);
+    if (result != PAL_RESULT_SUCCESS) {
+        logResult(result, "Failed to map buffer");
+        DEBUG_BREAK();
+        return false;
+    }
+
+    memcpy(ptr, indices, createInfo.size);
+    palUnmapBuffer(m_IndexStagingBuffer);
+
+    // copy staging buffer to index buffer
+    result = palCmdBegin(m_Frames[0].cmdBuffer, nullptr);
+    if (result != PAL_RESULT_SUCCESS) {
+        logResult(result, "Failed to begin command buffer");
+        DEBUG_BREAK();
+        return false;
+    }
+
+    PalBufferCopyInfo copyInfo = {0};
+    copyInfo.size = createInfo.size;
+    palCmdCopyBuffer(m_Frames[0].cmdBuffer, m_IndexBuffer, m_IndexStagingBuffer, &copyInfo);
+
+    result = palCmdEnd(m_Frames[0].cmdBuffer);
+    if (result != PAL_RESULT_SUCCESS) {
+        logResult(result, "Failed to end command buffer");
+        DEBUG_BREAK();
+        return false;
+    }
+
+    result = palResetFence(m_Frames[0].fence);
+    if (result != PAL_RESULT_SUCCESS) {
+        logResult(result, "Failed to reset fence");
+        DEBUG_BREAK();
+        return false;
+    }
+
+    PalCommandBufferSubmitInfo submitInfo = {0};
+    submitInfo.cmdBuffer = m_Frames[0].cmdBuffer;
+    submitInfo.fence = m_Frames[0].fence;
+    result = palSubmitCommandBuffer(m_Queue, &submitInfo);
+    if (result != PAL_RESULT_SUCCESS) {
+        logResult(result, "Failed to submit command buffer");
+        DEBUG_BREAK();
+        return false;
+    }
+
+    result = palWaitFence(m_Frames[0].fence, PAL_INFINITE);
+    if (result != PAL_RESULT_SUCCESS) {
+        logResult(result, "Failed to wait fence");
+        DEBUG_BREAK();
+        return false;
+    }
+
+    palDestroyBuffer(m_IndexStagingBuffer);
+    result = palResetCommandBuffer(m_Frames[0].cmdBuffer);
+    if (result != PAL_RESULT_SUCCESS) {
+        logResult(result, "Failed to reset command buffer");
+        DEBUG_BREAK();
+        return false;
+    }
+
     s_Vertices[0] = { -0.5f, -0.5f, 0.0f, 1.0f };
     s_Vertices[1] = {  0.5f, -0.5f, 0.0f, 1.0f };
     s_Vertices[2] = {  0.5f,  0.5f, 0.0f, 1.0f };
@@ -66,39 +548,11 @@ void Renderer::initialize(PalWindow* window)
     m_ImageRange.startArrayLayer = 0;
     m_ImageRange.startMipLevel = 0;
 
-    createDevice();
-    createSwapchain(window);
-    createSyncObjects();
-    createDescriptorObjects();
-
-    createBuffers();
-    createPipeline();
-    
-    result = palWaitFence(m_Frames[0].fence, PAL_INFINITE);
-    if (result != PAL_RESULT_SUCCESS) {
-        logResult(result, "Failed to wait fence");
-        DEBUG_BREAK();
-        return;
-    }
-
-    palDestroyBuffer(m_IndexStagingBuffer);
-    result = palResetCommandBuffer(m_Frames[0].cmdBuffer);
-    if (result != PAL_RESULT_SUCCESS) {
-        logResult(result, "Failed to reset command buffer");
-        DEBUG_BREAK();
-        return;
-    }
-
-    uint32_t w;
-    uint32_t h;
-    palGetWindowSize(window, &w, &h);
-
-    m_Viewport.width = (float)w;
-    m_Viewport.height = (float)h;
+    m_Viewport.width = (float)windowWidth;
+    m_Viewport.height = (float)windowHeight;
     m_Viewport.maxDepth = 1.0f;
-
-    m_Scissor.width = w;
-    m_Scissor.height = h;
+    m_Scissor.width = windowWidth;
+    m_Scissor.height = windowHeight;
 
     PalSamplerCreateInfo samplerCreateInfo = {0};
     samplerCreateInfo.addressModeU = PAL_SAMPLER_ADDRESS_MODE_REPEAT;
@@ -113,11 +567,11 @@ void Renderer::initialize(PalWindow* window)
 
     samplerCreateInfo.maxAnisotropy = 1.0f;
     samplerCreateInfo.minFilterMode = PAL_FILTER_MODE_LINEAR;
-    result = palCreateSampler(m_Device, &samplerCreateInfo, &m_Sampler);
+    result = palCreateSampler(device, &samplerCreateInfo, &m_Sampler);
     if (result != PAL_RESULT_SUCCESS) {
         logResult(result, "Failed to create sampler");
         DEBUG_BREAK();
-        return;
+        return false;
     }
 
     PalDescriptorSamplerInfo samplerInfo = {0};
@@ -130,12 +584,15 @@ void Renderer::initialize(PalWindow* window)
     writeInfo.layoutBindingIndex = 1;
 
     writeInfo.samplerInfos = &samplerInfo;
-    result = palUpdateDescriptorSet(m_Device, 1, &writeInfo);
+    result = palUpdateDescriptorSet(device, 1, &writeInfo);
     if (result != PAL_RESULT_SUCCESS) {
         logResult(result, "Failed to update descriptor set");
         DEBUG_BREAK();
-        return;
+        return false;
     }
+
+    palFree(nullptr, indices);
+    return true;
 }
 
 void Renderer::shutdown()
@@ -169,8 +626,6 @@ void Renderer::shutdown()
     palDestroySwapchain(m_Swapchain);
     palDestroySurface(m_Surface);
     palDestroyQueue(m_Queue);
-    palDestroyDevice(m_Device);
-    palShutdownGraphics();
 
     palFree(nullptr, m_ImageViews);
     palFree(nullptr, m_RenderFinishedSemaphores);
@@ -257,8 +712,8 @@ void Renderer::beginRendering(Camera* camera, const glm::vec4& clearColor)
     renderingInfo.colorAttachments = &colorAttachment;
     renderingInfo.arrayLayerCount = 1;
     renderingInfo.viewCount = 1;
-    renderingInfo.renderArea.width = WINDOW_WIDTH;
-    renderingInfo.renderArea.height = WINDOW_HEIGHT;
+    renderingInfo.renderArea.width = (uint32_t)m_Viewport.width;
+    renderingInfo.renderArea.height = (uint32_t)m_Viewport.height;
 
     palCmdBeginRendering(frame->cmdBuffer, &renderingInfo);
     resetBatch();
@@ -351,14 +806,17 @@ void Renderer::resize(uint32_t width, uint32_t height)
     m_Scissor.height = (uint32_t)m_Viewport.height;
 }
 
-PalShader* Renderer::createShader(const char* path, PalShaderStage stage)
+PalShader* Renderer::createShader(
+    const char* path, 
+    PalShaderStage stage,
+    PalShaderFormats format)
 {
     const char* mode = nullptr;
     void* buffer = nullptr;
 
-    if ((m_ShaderFormats & PAL_SHADER_FORMAT_SPIRV) || 
-       (m_ShaderFormats & PAL_SHADER_FORMAT_DXIL) ||
-       (m_ShaderFormats & PAL_SHADER_FORMAT_DXBC)) {
+    if ((format & PAL_SHADER_FORMAT_SPIRV) || 
+       (format & PAL_SHADER_FORMAT_DXIL) ||
+       (format & PAL_SHADER_FORMAT_DXBC)) {
         // binary formats
         mode = "rb";
     }
@@ -402,582 +860,11 @@ PalShader* Renderer::createShader(const char* path, PalShaderStage stage)
     if (result != PAL_RESULT_SUCCESS) {
         palFree(nullptr, buffer);
         logResult(result, "Failed to create shader");
+        return nullptr;
     }
 
     palFree(nullptr, buffer);
     return shader;
-}
-
-void Renderer::createDevice()
-{
-    uint32_t count = 0;
-    PalResult result = palEnumerateAdapters(&count, nullptr);
-    if (result != PAL_RESULT_SUCCESS) {
-        logResult(result, "Failed to get adapters");
-        DEBUG_BREAK();
-        return;
-    }
-
-    if (count == 0) {
-        palLog(nullptr, "No adapters found");
-        DEBUG_BREAK();
-        return;
-    }
-
-    PalAdapter** adapters = nullptr;
-    adapters = (PalAdapter**)palAllocate(nullptr, sizeof(PalAdapter*) * count, 0);
-    if (!adapters) {
-        palLog(nullptr, "Failed to allocate memory");
-        DEBUG_BREAK();
-        return;
-    }
-
-    result = palEnumerateAdapters(&count, adapters);
-    if (result != PAL_RESULT_SUCCESS) {
-        palFree(nullptr, adapters);
-        logResult(result, "Failed to get adapters");
-        DEBUG_BREAK();
-        return;
-    }
-
-    PalAdapterCapabilities caps = {0};
-    PalAdapterFeatures adapterFeatures = 0;
-    PalAdapterInfo adapterInfo = {0};
-    for (int32_t i = 0; i < count; i++) {
-        m_Adapter = adapters[i];
-        palGetAdapterInfo(m_Adapter, &adapterInfo);
-        if (adapterInfo.type == PAL_ADAPTER_TYPE_CPU) {
-            continue;
-        }
-
-        palGetAdapterCapabilities(m_Adapter, &caps);
-        if (caps.maxGraphicsQueues == 0 || caps.maxCopyQueues) {
-            m_Adapter = nullptr;
-            continue;
-
-        } else {
-            adapterFeatures = palGetAdapterFeatures(m_Adapter);
-            if (!(adapterFeatures & PAL_ADAPTER_FEATURE_SWAPCHAIN)) {
-                continue;
-            }
-
-            if (!(adapterFeatures & PAL_ADAPTER_FEATURE_FENCE_RESET)) {
-                continue;
-            }
-            break;
-        }
-    }
-
-    palFree(nullptr, adapters);
-    if (!m_Adapter) {
-        palLog(nullptr, "Failed to find a required adapter");
-        DEBUG_BREAK();
-        return;
-    }
-
-    // create device
-    PalAdapterFeatures features = PAL_ADAPTER_FEATURE_SWAPCHAIN;
-    result = palCreateDevice(m_Adapter, features, &m_Device);
-    if (result != PAL_RESULT_SUCCESS) {
-        logResult(result, "Failed to create m_Device");
-        DEBUG_BREAK();
-        return;
-    }
-
-    m_ShaderFormats = adapterInfo.shaderFormats;
-    m_MaxGraphicsQueues = caps.maxGraphicsQueues;
-}
-
-void Renderer::createSwapchain(PalWindow* window)
-{
-    PalPlatformInfo platformInfo = {0};
-    PalWindowHandleInfo winHandle = {0};
-    palGetWindowHandleInfo(window, &winHandle);
-    palGetPlatformInfo(&platformInfo);
-
-    PalWindowInstanceType windowInstanceType = PAL_WINDOW_INSTANCE_TYPE_XCB;
-    if (platformInfo.apiType == PAL_PLATFORM_API_TYPE_WAYLAND) {
-        windowInstanceType = PAL_WINDOW_INSTANCE_TYPE_WAYLAND;
-
-    } else if (platformInfo.apiType == PAL_PLATFORM_API_TYPE_X11) {
-        windowInstanceType = PAL_WINDOW_INSTANCE_TYPE_X11;
-
-    } else if (platformInfo.apiType == PAL_PLATFORM_API_TYPE_WIN32) {
-        windowInstanceType = PAL_WINDOW_INSTANCE_TYPE_WIN32;
-    }
-
-    PalResult result = palCreateSurface(
-        m_Device,
-        winHandle.nativeWindow,
-        winHandle.nativeInstance,
-        windowInstanceType,
-        &m_Surface);
-
-    if (result != PAL_RESULT_SUCCESS) {
-        logResult(result, "Failed to create surface");
-        DEBUG_BREAK();
-        return;
-    }
-
-    PalBool foundQueue = PAL_FALSE;
-    for (int i = 0; i < m_MaxGraphicsQueues; i++) {
-        result = palCreateQueue(m_Device, PAL_QUEUE_TYPE_GRAPHICS, &m_Queue);
-        if (result != PAL_RESULT_SUCCESS) {
-            logResult(result, "Failed to create queue");
-            DEBUG_BREAK();
-            return;
-        }
-
-        if (!palCanQueuePresent(m_Queue, m_Surface)) {
-            palDestroyQueue(m_Queue);
-        } else {
-            // found a queue
-            foundQueue = PAL_TRUE;
-            break;
-        }
-    }
-
-    if (!foundQueue) {
-        palLog(nullptr, "Failed to find a queue that can present to the surface");
-        DEBUG_BREAK();
-        return;
-    }
-
-    PalSurfaceCapabilities surfaceCaps = {0};
-    palGetSurfaceCapabilities(m_Device, m_Surface, &surfaceCaps);
-
-    PalSwapchainCreateInfo swapchainCreateInfo = {0};
-    swapchainCreateInfo.clipped = PAL_TRUE;
-    swapchainCreateInfo.compositeAlpha = PAL_COMPOSITE_ALPHA_OPAQUE;
-    swapchainCreateInfo.height = WINDOW_HEIGHT;
-    swapchainCreateInfo.width = WINDOW_WIDTH;
-    swapchainCreateInfo.imageArrayLayerCount = 1;
-    swapchainCreateInfo.presentMode = PAL_PRESENT_MODE_FIFO;
-    swapchainCreateInfo.format = PAL_SURFACE_FORMAT_BGRA8_UNORM_SRGB_NONLINEAR;
-
-    // rare but possible on andriod
-    if (WINDOW_WIDTH > surfaceCaps.maxImageWidth) {
-        swapchainCreateInfo.width = surfaceCaps.maxImageWidth / 2;
-    }
-
-    if (WINDOW_HEIGHT > surfaceCaps.maxImageHeight) {
-        swapchainCreateInfo.height = surfaceCaps.maxImageHeight / 2;
-    }
-
-    swapchainCreateInfo.imageCount = surfaceCaps.minImageCount;
-    if (swapchainCreateInfo.imageCount == 1) {
-        swapchainCreateInfo.imageCount++;
-        if (surfaceCaps.maxImageCount < 2) {
-            palLog(nullptr, "Surface does not support double buffers");
-            DEBUG_BREAK();
-            return;
-        }
-    }
-
-    result = palCreateSwapchain(
-        m_Device, 
-        m_Queue, 
-        m_Surface, 
-        &swapchainCreateInfo, 
-        &m_Swapchain);
-
-    if (result != PAL_RESULT_SUCCESS) {
-        logResult(result, "Failed to create swapchain");
-        palDestroySurface(m_Surface);
-        DEBUG_BREAK();
-        return;
-    }
-
-    m_ImageCount = swapchainCreateInfo.imageCount;
-    m_ImageViews = (PalImageView**)palAllocate(
-        nullptr, 
-        sizeof(PalImageView*) * m_ImageCount, 
-        0);
-
-    m_InFlightImages = (PalFence**)palAllocate(
-        nullptr, 
-        sizeof(PalFence*) * m_ImageCount, 
-        0);
-
-    m_RenderFinishedSemaphores = (PalSemaphore**)palAllocate(
-        nullptr, 
-        sizeof(PalSemaphore*) * m_ImageCount, 
-        0);
-
-    if (!m_ImageViews || !m_InFlightImages || !m_RenderFinishedSemaphores) {
-        palLog(nullptr, "Failed to allocate memory");
-        palDestroySwapchain(m_Swapchain);
-        palDestroySurface(m_Surface);
-        DEBUG_BREAK();
-        return;
-    }
-
-    PalImageInfo imageInfo;
-    palGetImageInfo(palGetSwapchainImage(m_Swapchain, 0), &imageInfo);
-
-    PalImageViewCreateInfo imageViewCreateInfo = {0};
-    imageViewCreateInfo.type = PAL_IMAGE_VIEW_TYPE_2D;
-    imageViewCreateInfo.subresourceRange.layerArrayCount = 1;
-    imageViewCreateInfo.subresourceRange.mipLevelCount = 1;
-    imageViewCreateInfo.subresourceRange.startArrayLayer = 0;
-    imageViewCreateInfo.subresourceRange.startMipLevel = 0;
-    imageViewCreateInfo.format = imageInfo.format;
-
-    for (int i = 0; i < m_ImageCount; i++) {
-        PalImage* image = palGetSwapchainImage(m_Swapchain, i);
-        if (!image) {
-            palLog(nullptr, "Failed to get swapchain image");
-            palDestroySwapchain(m_Swapchain);
-            palDestroySurface(m_Surface);
-            DEBUG_BREAK();
-            return;
-        }
-
-        result = palCreateImageView(m_Device, image, &imageViewCreateInfo, &m_ImageViews[i]);
-        if (result != PAL_RESULT_SUCCESS) {
-            logResult(result, "Failed to create image view");
-            palDestroySwapchain(m_Swapchain);
-            palDestroySurface(m_Surface);
-            DEBUG_BREAK();
-            return;
-        }
-
-        // create render finished semaphores
-        result = palCreateSemaphore(m_Device, PAL_FALSE, &m_RenderFinishedSemaphores[i]);
-        if (result != PAL_RESULT_SUCCESS) {
-            logResult(result, "Failed to create semaphore");
-            palDestroySwapchain(m_Swapchain);
-            palDestroySurface(m_Surface);
-            DEBUG_BREAK();
-            return;
-        }
-
-        m_InFlightImages[i] = nullptr;
-    }
-
-    m_ImageFormat = imageInfo.format;
-}
-
-void Renderer::createPipeline()
-{
-    const char* sources[2];
-    if (m_ShaderFormats & PAL_SHADER_FORMAT_SPIRV) {
-        sources[0] = "assets/shaders/spirv/vertex_quad.spv";
-        sources[1] = "assets/shaders/spirv/fragment_quad.spv";
-
-    } else if (m_ShaderFormats & PAL_SHADER_FORMAT_DXBC) {
-        sources[0] = "assets/shaders/dxbc/vertex_quad.cso";
-        sources[1] = "assets/shaders/dxbc/fragment_quad.cso";
-
-    } else {
-        palLog(nullptr, "Failed to find a supported shader format");
-        DEBUG_BREAK();
-        return;
-    }
-
-    PalShader* shaders[2];
-    PalShaderStage stages[2] = { PAL_SHADER_STAGE_VERTEX, PAL_SHADER_STAGE_FRAGMENT };
-    for (int i = 0; i < 2; i++) {
-        shaders[i] = createShader(sources[i], stages[i]);
-        if (!shaders[i]) {
-            DEBUG_BREAK();
-            return;
-        }
-    }
-
-    PalPipelineLayoutCreateInfo layoutCreateInfo = {0};
-    layoutCreateInfo.descriptorSetLayoutCount = 1;
-    layoutCreateInfo.descriptorSetLayouts = &m_DescriptorSetLayout;
-    layoutCreateInfo.usePushConstant = PAL_TRUE;
-    layoutCreateInfo.pushConstantInfo.size = sizeof(PushConstant);
-
-    PalResult result = palCreatePipelineLayout(
-        m_Device, 
-        &layoutCreateInfo, 
-        &m_PipelineLayout);
-
-    if (result != PAL_RESULT_SUCCESS) {
-        logResult(result, "Failed to create pipeline layout");
-        DEBUG_BREAK();
-        return;
-    }
-
-    PalVertexAttribute attributes[3] = {
-        { PAL_VERTEX_SEMANTIC_ID_POSITION, PAL_VERTEX_TYPE_FLOAT2 },
-        { PAL_VERTEX_SEMANTIC_ID_TEXCOORD, PAL_VERTEX_TYPE_FLOAT2 },
-        { PAL_VERTEX_SEMANTIC_ID_TEXCOORD, PAL_VERTEX_TYPE_UINT32 } // TEXCOORD1
-    };
-
-    PalVertexLayout vertexLayout = {0};
-    vertexLayout.attributeCount = 3;
-    vertexLayout.attributes = attributes;
-    vertexLayout.binding = 0;
-    vertexLayout.type = PAL_VERTEX_LAYOUT_TYPE_PER_VERTEX;
-
-    PalRenderingLayoutInfo renderingLayoutInfo = {0};
-    renderingLayoutInfo.colorAttachentCount = 1;
-    renderingLayoutInfo.colorAttachmentsFormat = &m_ImageFormat;
-    renderingLayoutInfo.sampleCount = PAL_SAMPLE_COUNT_1;
-    renderingLayoutInfo.viewCount = 1;
-
-    // color blend attachment
-    PalColorBlendAttachment blendAttachment = {0};
-    blendAttachment.colorWriteMask |= PAL_COLOR_MASK_RED;
-    blendAttachment.colorWriteMask |= PAL_COLOR_MASK_GREEN;
-    blendAttachment.colorWriteMask |= PAL_COLOR_MASK_BLUE;
-    blendAttachment.colorWriteMask |= PAL_COLOR_MASK_ALPHA;
-
-    PalGraphicsPipelineCreateInfo pipelineCreateInfo = {0};
-    pipelineCreateInfo.colorBlendAttachmentCount = 1;
-    pipelineCreateInfo.colorBlendAttachments = &blendAttachment;
-    pipelineCreateInfo.pipelineLayout = m_PipelineLayout;
-
-    pipelineCreateInfo.renderingLayout = &renderingLayoutInfo;
-    pipelineCreateInfo.topology = PAL_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-    pipelineCreateInfo.vertexLayoutCount = 1;
-    pipelineCreateInfo.vertexLayouts = &vertexLayout;
-
-    pipelineCreateInfo.shaders = shaders;
-    pipelineCreateInfo.shaderCount = 2;
-
-    result = palCreateGraphicsPipeline(m_Device, &pipelineCreateInfo, &m_QuadPipeline);
-    if (result != PAL_RESULT_SUCCESS) {
-        logResult(result, "Failed to create graphics pipeline");
-        DEBUG_BREAK();
-        return;
-    }
-
-    for (int i = 0; i < 2; i++) {
-        palDestroyShader(shaders[i]);
-    }
-}
-
-void Renderer::createBuffers()
-{
-    // build indices
-    uint32_t* indices = nullptr;
-    indices = (uint32_t*)palAllocate(nullptr, sizeof(uint32_t) * MAX_INDICES, 0);
-    if (!indices) {
-        DEBUG_BREAK();
-        return;
-    }
-
-    for (int i = 0; i < MAX_QUADS; i++) {
-        uint32_t offset = i * 4;
-
-        indices[i * 6 + 0] = offset + 0;
-        indices[i * 6 + 1] = offset + 1;
-        indices[i * 6 + 2] = offset + 2;
-
-        indices[i * 6 + 3] = offset + 2;
-        indices[i * 6 + 4] = offset + 3;
-        indices[i * 6 + 5] = offset + 0;
-    }
-
-    PalBufferCreateInfo createInfo = {0};
-    for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-        Frame* frame = &m_Frames[i];
-
-        createInfo.memoryUsage = PAL_BUFFER_MEMORY_USAGE_AUTO_GPU_ONLY;
-        createInfo.usages = PAL_BUFFER_USAGE_VERTEX | PAL_BUFFER_USAGE_TRANSFER_DST;
-        createInfo.size = sizeof(Vertex) * MAX_VERTICES;
-        PalResult result = palCreateBuffer(m_Device, &createInfo, &frame->vertexBuffer);
-        if (result != PAL_RESULT_SUCCESS) {
-            logResult(result, "Failed to create buffer");
-            DEBUG_BREAK();
-            return;
-        }
-
-        // create upload buffer
-        createInfo.memoryUsage = PAL_BUFFER_MEMORY_USAGE_AUTO_CPU_UPLOAD;
-        createInfo.usages = PAL_BUFFER_USAGE_TRANSFER_SRC;
-        result = palCreateBuffer(m_Device, &createInfo, &frame->uploadBuffer);
-        if (result != PAL_RESULT_SUCCESS) {
-            logResult(result, "Failed to create buffer");
-            DEBUG_BREAK();
-            return;
-        }
-
-        void* ptr = nullptr;
-        result = palMapBuffer(frame->uploadBuffer, 0, createInfo.size, &ptr);
-        if (result != PAL_RESULT_SUCCESS) {
-            logResult(result, "Failed to map buffer");
-            DEBUG_BREAK();
-            return;
-        }
-
-        frame->ptr = (Vertex*)ptr;
-    }
-
-    // create index buffer
-    createInfo.memoryUsage = PAL_BUFFER_MEMORY_USAGE_AUTO_GPU_ONLY;
-    createInfo.usages = PAL_BUFFER_USAGE_INDEX | PAL_BUFFER_USAGE_TRANSFER_DST;
-    createInfo.size = sizeof(uint32_t) * MAX_INDICES;
-
-    PalResult result = palCreateBuffer(m_Device, &createInfo, &m_IndexBuffer);
-    if (result != PAL_RESULT_SUCCESS) {
-        logResult(result, "Failed to create buffer");
-        DEBUG_BREAK();
-        return;
-    }
-
-    // create staging buffer for index buffer
-    createInfo.memoryUsage = PAL_BUFFER_MEMORY_USAGE_AUTO_CPU_UPLOAD;
-    createInfo.usages = PAL_BUFFER_USAGE_TRANSFER_SRC;
-    createInfo.size = sizeof(uint32_t) * MAX_INDICES;
-
-    result = palCreateBuffer(m_Device, &createInfo, &m_IndexStagingBuffer);
-    if (result != PAL_RESULT_SUCCESS) {
-        logResult(result, "Failed to create buffer");
-        DEBUG_BREAK();
-        return;
-    }
-
-    // copy indices to staging buffer
-    void* ptr = nullptr;
-    result = palMapBuffer(m_IndexStagingBuffer, 0, createInfo.size, &ptr);
-    if (result != PAL_RESULT_SUCCESS) {
-        logResult(result, "Failed to map buffer");
-        DEBUG_BREAK();
-        return;
-    }
-
-    memcpy(ptr, indices, createInfo.size);
-    palUnmapBuffer(m_IndexStagingBuffer);
-
-    // copy staging buffer to index buffer
-    result = palCmdBegin(m_Frames[0].cmdBuffer, nullptr);
-    if (result != PAL_RESULT_SUCCESS) {
-        logResult(result, "Failed to begin command buffer");
-        DEBUG_BREAK();
-        return;
-    }
-
-    PalBufferCopyInfo copyInfo = {0};
-    copyInfo.size = createInfo.size;
-    palCmdCopyBuffer(m_Frames[0].cmdBuffer, m_IndexBuffer, m_IndexStagingBuffer, &copyInfo);
-
-    result = palCmdEnd(m_Frames[0].cmdBuffer);
-    if (result != PAL_RESULT_SUCCESS) {
-        logResult(result, "Failed to end command buffer");
-        DEBUG_BREAK();
-        return;
-    }
-
-    result = palResetFence(m_Frames[0].fence);
-    if (result != PAL_RESULT_SUCCESS) {
-        logResult(result, "Failed to reset fence");
-        DEBUG_BREAK();
-        return;
-    }
-
-    PalCommandBufferSubmitInfo submitInfo = {0};
-    submitInfo.cmdBuffer = m_Frames[0].cmdBuffer;
-    submitInfo.fence = m_Frames[0].fence;
-    result = palSubmitCommandBuffer(m_Queue, &submitInfo);
-    if (result != PAL_RESULT_SUCCESS) {
-        logResult(result, "Failed to submit command buffer");
-        DEBUG_BREAK();
-        return;
-    }
-
-    palFree(nullptr, indices);
-}
-
-void Renderer::createSyncObjects()
-{
-    PalResult result = palCreateCommandPool(m_Device, m_Queue, &m_CmdPool);
-    if (result != PAL_RESULT_SUCCESS) {
-        logResult(result, "Failed to create command pool");
-        DEBUG_BREAK();
-        return;
-    }
-
-    for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-        Frame* frame = &m_Frames[i];
-
-        result = palCreateSemaphore(
-            m_Device, 
-            PAL_FALSE, 
-            &frame->semaphore);
-
-        if (result != PAL_RESULT_SUCCESS) {
-            logResult(result, "Failed to create semaphore");
-            DEBUG_BREAK();
-            return;
-        }
-
-        result = palCreateFence(m_Device, PAL_TRUE, &frame->fence);
-        if (result != PAL_RESULT_SUCCESS) {
-            logResult(result, "Failed to create fence");
-            DEBUG_BREAK();
-            return;
-        }
-
-        result = palAllocateCommandBuffer(
-            m_Device,
-            m_CmdPool,
-            PAL_COMMAND_BUFFER_TYPE_PRIMARY,
-            &frame->cmdBuffer);
-
-        if (result != PAL_RESULT_SUCCESS) {
-            logResult(result, "Failed to allocate command buffer");
-            DEBUG_BREAK();
-            return;
-        }
-    }
-}
-
-void Renderer::createDescriptorObjects()
-{
-    PalDescriptorSetLayoutBinding bindings[2] = {
-        { 16, PAL_DESCRIPTOR_TYPE_SAMPLED_IMAGE },
-        { 1, PAL_DESCRIPTOR_TYPE_SAMPLER }
-    };
-
-    PalDescriptorPoolBindingSize bindingSizes[2] = {
-        { 16, PAL_DESCRIPTOR_TYPE_SAMPLED_IMAGE },
-        { 1, PAL_DESCRIPTOR_TYPE_SAMPLER }
-    };
-
-    PalDescriptorSetLayoutCreateInfo layoutCreateInfo = {0};
-    layoutCreateInfo.bindingCount = 2;
-    layoutCreateInfo.bindings = bindings;
-
-    PalResult result = palCreateDescriptorSetLayout(
-        m_Device, 
-        &layoutCreateInfo, 
-        &m_DescriptorSetLayout);
-
-    if (result != PAL_RESULT_SUCCESS) {
-        logResult(result, "Failed to create descriptor set layout");
-        DEBUG_BREAK();
-        return;
-    }
-
-    PalDescriptorPoolCreateInfo poolCreateInfo = {0};
-    poolCreateInfo.bindingSizeCount = 2;
-    poolCreateInfo.bindingSizes = bindingSizes;
-    poolCreateInfo.maxDescriptorSets = 1;
-
-    result = palCreateDescriptorPool(m_Device, &poolCreateInfo, &m_DescriptorPool);
-    if (result != PAL_RESULT_SUCCESS) {
-        logResult(result, "Failed to create descriptor pool");
-        DEBUG_BREAK();
-        return;
-    }
-
-    result = palAllocateDescriptorSet(
-        m_Device, 
-        m_DescriptorPool, 
-        m_DescriptorSetLayout, 
-        &m_DescriptorSet);
-
-    if (result != PAL_RESULT_SUCCESS) {
-        logResult(result, "Failed to allocate descriptor set");
-        DEBUG_BREAK();
-        return;
-    }
 }
 
 void Renderer::resetBatch()

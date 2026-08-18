@@ -8,7 +8,7 @@
 
 struct Data {
     PalBuffer* buffer = nullptr;
-    PalFence* fence = nullptr;
+    PalSemaphore* semaphore;
     PalQueue* queue = nullptr;
     PalCommandPool* cmdPool;
     PalCommandBuffer* cmdBuffer = nullptr;
@@ -19,15 +19,13 @@ struct Data {
 
 static Data s_Data;
 
-void AssetManager::initialize(Renderer* renderer)
+bool AssetManager::initialize(PalDevice* device)
 {
-    PalDevice* device = renderer->m_Device;
-
     PalResult result = palCreateQueue(device, PAL_QUEUE_TYPE_COPY, &s_Data.queue);
     if (result != PAL_RESULT_SUCCESS) {
         logResult(result, "Failed to create queue");
         DEBUG_BREAK();
-        return;
+        return false;
     }
 
     result = palCreateCommandPool(device, s_Data.queue, &s_Data.cmdPool);
@@ -35,7 +33,7 @@ void AssetManager::initialize(Renderer* renderer)
         logResult(result, "Failed to create command pool");
         palDestroyQueue(s_Data.queue);
         DEBUG_BREAK();
-        return;
+        return false;
     }
 
     result = palAllocateCommandBuffer(
@@ -45,21 +43,21 @@ void AssetManager::initialize(Renderer* renderer)
         &s_Data.cmdBuffer);
 
     if (result != PAL_RESULT_SUCCESS) {
-        logResult(result, "Failed to create command pool");
+        logResult(result, "Failed to allocate command buffer");
         palDestroyCommandPool(s_Data.cmdPool);
         palDestroyQueue(s_Data.queue);
         DEBUG_BREAK();
-        return;
+        return false;
     }
 
-    result = palCreateFence(device, PAL_FALSE, &s_Data.fence);
+    result = palCreateSemaphore(device, PAL_FALSE, &s_Data.semaphore);
     if (result != PAL_RESULT_SUCCESS) {
-        logResult(result, "Failed to create command pool");
+        logResult(result, "Failed to create semaphore");
         palFreeCommandBuffer(s_Data.cmdBuffer);
         palDestroyCommandPool(s_Data.cmdPool);
         palDestroyQueue(s_Data.queue);
         DEBUG_BREAK();
-        return;
+        return false;
     }
 
     PalBufferCreateInfo createInfo = {0};
@@ -70,35 +68,38 @@ void AssetManager::initialize(Renderer* renderer)
 
     result = palCreateBuffer(device, &createInfo, &s_Data.buffer);
     if (result != PAL_RESULT_SUCCESS) {
-        logResult(result, "Failed to create command pool");
-        palDestroyFence(s_Data.fence);
+        logResult(result, "Failed to create buffer");
+        palDestroySemaphore(s_Data.semaphore);
         palFreeCommandBuffer(s_Data.cmdBuffer);
         palDestroyCommandPool(s_Data.cmdPool);
         palDestroyQueue(s_Data.queue);
         DEBUG_BREAK();
-        return;
+        return false;
     }
 
     result = palMapBuffer(s_Data.buffer, 0, s_Data.size, &s_Data.ptr);
     if (result != PAL_RESULT_SUCCESS) {
         logResult(result, "Failed to map buffer");
         palDestroyBuffer(s_Data.buffer);
-        palDestroyFence(s_Data.fence);
+        palDestroySemaphore(s_Data.semaphore);
         palFreeCommandBuffer(s_Data.cmdBuffer);
         palDestroyCommandPool(s_Data.cmdPool);
         palDestroyQueue(s_Data.queue);
         DEBUG_BREAK();
-        return;
+        return false;
     }
 
     s_Data.device = device;
+    return true;
 }
 
 void AssetManager::shutdown()
 {
+    palWaitQueue(s_Data.queue);
+
     palUnmapBuffer(s_Data.buffer);
     palDestroyBuffer(s_Data.buffer);
-    palDestroyFence(s_Data.fence);
+    palDestroySemaphore(s_Data.semaphore);
     palFreeCommandBuffer(s_Data.cmdBuffer);
     palDestroyCommandPool(s_Data.cmdPool);
     palDestroyQueue(s_Data.queue);

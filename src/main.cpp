@@ -2,28 +2,29 @@
 #include "pal2/pal_thread.h"
 #include "pal2/pal_graphics.h"
 #include "pal2/pal_video.h"
-#include "pal2/pal_system.h"
+#include "asset_manager.h"
+
+#include "renderer.h"
 #include "helper.h"
 
-typedef struct {
-    PalDevice* device;
-    PalAdapterCapabilities adapterCaps;
-    PalAdapterInfo adapterInfo;
-    PalWindow* window;
-} ThreadArgument;
+struct GameData {
+    AssetManager assetManager;
+    Renderer renderer;
+    PalDevice* device = nullptr;
+    PalWindow* window = nullptr;
+    PalAdapter* adapter = nullptr;
+    uint32_t windowWidth = 0;
+    uint32_t windowHeight = 0;
+};
 
-static ThreadArgument s_ThreadArg = {0};
+static GameData s_GameData;
 
-static bool createDevice(
-    PalAdapterCapabilities* adapterCaps, 
-    PalAdapterInfo* adapterInfo, 
-    PalAdapter** outAdapter, 
-    PalDevice** outDevice)
+static bool createDevice()
 {
     uint32_t count = 0;
-    PalAdapter* adapter = nullptr;
-    PalDevice* device = nullptr;
     PalAdapterFeatures adapterFeatures = 0;
+    PalAdapterCapabilities adapterCaps = {};
+    PalAdapterInfo adapterInfo = {};
 
     PalResult result = palEnumerateAdapters(&count, nullptr);
     if (result != PAL_RESULT_SUCCESS) {
@@ -55,25 +56,25 @@ static bool createDevice(
     }
 
     for (int32_t i = 0; i < count; i++) {
-        adapter = adapters[i];
-        palGetAdapterInfo(adapter, adapterInfo);
-        if (adapterInfo->type == PAL_ADAPTER_TYPE_CPU) {
-            adapter = nullptr;
+        s_GameData.adapter = adapters[i];
+        palGetAdapterInfo(s_GameData.adapter, &adapterInfo);
+        if (adapterInfo.type == PAL_ADAPTER_TYPE_CPU) {
+            s_GameData.adapter = nullptr;
             continue;
         }
 
-        if (adapterInfo->vtableVersion < PAL_GRAPHICS_BACKEND_VTABLE_VERSION_2) {
-            adapter = nullptr;
+        if (adapterInfo.vtableVersion < PAL_GRAPHICS_BACKEND_VTABLE_VERSION_2) {
+            s_GameData.adapter = nullptr;
             continue;
         }
 
-        palGetAdapterCapabilities(adapter, adapterCaps);
-        if (adapterCaps->maxGraphicsQueues == 0 || adapterCaps->maxCopyQueues == 0) {
-            adapter = nullptr;
+        palGetAdapterCapabilities(s_GameData.adapter, &adapterCaps);
+        if (adapterCaps.maxGraphicsQueues == 0 || adapterCaps.maxCopyQueues == 0) {
+            s_GameData.adapter = nullptr;
             continue;
 
         } else {
-            adapterFeatures = palGetAdapterFeatures(adapter);
+            adapterFeatures = palGetAdapterFeatures(s_GameData.adapter);
             if (!(adapterFeatures & PAL_ADAPTER_FEATURE_SWAPCHAIN)) {
                 continue;
             }
@@ -86,7 +87,7 @@ static bool createDevice(
     }
 
     palFree(nullptr, adapters);
-    if (!adapter) {
+    if (!s_GameData.adapter) {
         palLog(nullptr, "Failed to find a required adapter");
         DEBUG_BREAK();
         return false;
@@ -96,79 +97,44 @@ static bool createDevice(
     PalAdapterFeatures features = PAL_ADAPTER_FEATURE_SWAPCHAIN;
     features |= PAL_ADAPTER_FEATURE_FENCE_RESET;
 
-    result = palCreateDevice(adapter, features, &device);
+    result = palCreateDevice(s_GameData.adapter, features, &s_GameData.device);
     if (result != PAL_RESULT_SUCCESS) {
         logResult(result, "Failed to create device");
         DEBUG_BREAK();
         return false;
     }
 
-    *outAdapter = adapter;
-    *outDevice = device;
     return true;
 }
 
-// static bool createSwapchain(
-//     PalDevice* device, 
-//     PalWindow* window, 
-//     PalSurface** outSurface, 
-//     PalSwapchain** outSwapchain)
-// {
-//     // PalPlatformInfo platformInfo = {0};
-//     // PalWindowHandleInfo winHandle = {0};
-//     // palGetWindowHandleInfo(window, &winHandle);
-//     // palGetPlatformInfo(&platformInfo);
-
-//     // PalWindowInstanceType windowInstanceType = PAL_WINDOW_INSTANCE_TYPE_XCB;
-//     // if (platformInfo.apiType == PAL_PLATFORM_API_TYPE_WAYLAND) {
-//     //     windowInstanceType = PAL_WINDOW_INSTANCE_TYPE_WAYLAND;
-
-//     // } else if (platformInfo.apiType == PAL_PLATFORM_API_TYPE_X11) {
-//     //     windowInstanceType = PAL_WINDOW_INSTANCE_TYPE_X11;
-
-//     // } else if (platformInfo.apiType == PAL_PLATFORM_API_TYPE_WIN32) {
-//     //     windowInstanceType = PAL_WINDOW_INSTANCE_TYPE_WIN32;
-//     // }
-
-//     // PalSurface* surface = nullptr;
-//     // PalResult result = palCreateSurface(
-//     //     device,
-//     //     winHandle.nativeWindow,
-//     //     winHandle.nativeInstance,
-//     //     windowInstanceType,
-//     //     &surface);
-
-//     // if (result != PAL_RESULT_SUCCESS) {
-//     //     logResult(result, "Failed to create surface");
-//     //     DEBUG_BREAK();
-//     //     return false;
-//     // }
-// }
-
 static void* PAL_CALL rendererInitWorker(void* arg)
 {
-    ThreadArgument* data = (ThreadArgument*)arg;
-    palLog(nullptr, "Renderer Init Thread");
+    bool result = s_GameData.renderer.initialize(
+        s_GameData.window, 
+        s_GameData.adapter, 
+        s_GameData.device, 
+        s_GameData.windowWidth, 
+        s_GameData.windowHeight);
+
+    if (!result) {
+        palLog(nullptr, "Failed to initialize renderer");
+        DEBUG_BREAK();
+    }
     return nullptr;
 }
 
 static void* PAL_CALL assetManagerInitWorker(void* arg)
 {
-    ThreadArgument* data = (ThreadArgument*)arg;
-    palLog(nullptr, "Asset Manager Init Thread");
+    bool result = s_GameData.assetManager.initialize(s_GameData.device);
+    if (!result) {
+        palLog(nullptr, "Failed to initialize asset manager");
+        DEBUG_BREAK();
+    }
     return nullptr;
 }
 
 int main(int argc, char** argv)
 {
-    PalAdapter* adapter = nullptr;
-    PalDevice* device = nullptr;
-    PalWindow* window = nullptr;
-    PalAdapterCapabilities adapterCaps;
-
-    PalAdapterInfo adapterInfo;
-    PalEventDriver* eventDriver = nullptr;
-
     PalResult result = palInitGraphics(nullptr, nullptr, 0, nullptr);
     if (result != PAL_RESULT_SUCCESS) {
         logResult(result, "Failed to initialize graphics");
@@ -176,7 +142,9 @@ int main(int argc, char** argv)
         return -1;
     }
 
+    PalEventDriver* eventDriver = nullptr;
     PalEventDriverCreateInfo eventDriverCreateInfo = {0};
+
     result = palCreateEventDriver(&eventDriverCreateInfo, &eventDriver);
     if (result != PAL_RESULT_SUCCESS) {
         logResult(result, "Failed to create event driver");
@@ -191,20 +159,14 @@ int main(int argc, char** argv)
         return -1;
     }
 
-    if (!createDevice(&adapterCaps, &adapterInfo, &adapter, &device)) {
+    if (!createDevice()) {
         palLog(nullptr, "Failed to create device");
         DEBUG_BREAK();
         return -1;
     }
 
-    s_ThreadArg.adapterCaps = adapterCaps;
-    s_ThreadArg.adapterInfo = adapterInfo;
-    s_ThreadArg.device = device;
-
     // create a thread to initialize the asset manager
     PalThreadCreateInfo threadCreateInfo = {0};
-    threadCreateInfo.allocator = nullptr;
-    threadCreateInfo.arg = (void*)&s_ThreadArg;
     threadCreateInfo.entry = assetManagerInitWorker;
 
     PalThread* assetManagerInitThread = nullptr;
@@ -216,22 +178,21 @@ int main(int argc, char** argv)
     }
 
     // create window
+    // TODO: get the first or primary monitor and create a borderless fullscreen
+    // window
+    uint32_t windowWidth = 640;
+    uint32_t windowHeight = 480;
+    s_GameData.windowWidth = windowWidth;
+    s_GameData.windowHeight = windowHeight;
+
     PalWindowCreateInfo windowCreateInfo = {0};
-    windowCreateInfo.width = WINDOW_WIDTH;
-    windowCreateInfo.height = WINDOW_HEIGHT;
+    windowCreateInfo.width = windowWidth;
+    windowCreateInfo.height = windowHeight;
     windowCreateInfo.show = PAL_TRUE;
     windowCreateInfo.title = "Space Ranger";
-    windowCreateInfo.style = PAL_WINDOW_STYLE_RESIZABLE;
+    windowCreateInfo.style = PAL_WINDOW_STYLE_RESIZABLE | PAL_WINDOW_STYLE_BORDERLESS;
 
-    // check if we support decorated windows (title bar, close etc)
-    PalVideoFeatures videoFeatures = palGetVideoFeatures();
-    if (!(videoFeatures & PAL_VIDEO_FEATURE_DECORATED_WINDOW)) {
-        // if we dont support, we need to create a borderless window
-        // and create the decorations ourselves
-        windowCreateInfo.style |= PAL_WINDOW_STYLE_BORDERLESS;
-    }
-
-    result = palCreateWindow(&windowCreateInfo, &window);
+    result = palCreateWindow(&windowCreateInfo, &s_GameData.window);
     if (result != PAL_RESULT_SUCCESS) {
         logResult(result, "Failed to create window");
         DEBUG_BREAK();
@@ -264,12 +225,9 @@ int main(int argc, char** argv)
         PAL_DISPATCH_MODE_POLL);
 
     // create a thread to initialize the renderer
-    s_ThreadArg.window = window;
-    threadCreateInfo.allocator = nullptr;
-    threadCreateInfo.arg = (void*)&s_ThreadArg;
+    PalThread* rendererInitThread = nullptr;
     threadCreateInfo.entry = rendererInitWorker;
 
-    PalThread* rendererInitThread = nullptr;
     result = palCreateThread(&threadCreateInfo, &rendererInitThread);
     if (result != PAL_RESULT_SUCCESS) {
         logResult(result, "Failed to create thread");
@@ -290,8 +248,12 @@ int main(int argc, char** argv)
         return -1;
     }
 
-    palDestroyWindow(window);
+    palDestroyWindow(s_GameData.window);
     palShutdownVideo();
     palDestroyEventDriver(eventDriver);
+    s_GameData.assetManager.shutdown();
+
+    s_GameData.renderer.shutdown();
+    palDestroyDevice(s_GameData.device);
     palShutdownGraphics();
 }

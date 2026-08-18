@@ -26,7 +26,13 @@ struct Frame {
 class Renderer {
     friend class AssetManager;
 public:
-    void initialize(PalWindow* window); 
+    bool initialize(
+        PalWindow* window, 
+        PalAdapter* adapter, 
+        PalDevice* device, 
+        uint32_t windowWidth, 
+        uint32_t windowHeight);
+        
     void shutdown();
 
     void beginRendering(Camera* camera, const glm::vec4& clearColor);
@@ -35,22 +41,16 @@ public:
     void resize(uint32_t width, uint32_t height);
 
 private:
-    PalShader* createShader(const char* path, PalShaderStage stage);
-    void createDevice();
-    void createSwapchain(PalWindow* window);
-    void createPipeline();
-
-    void createBuffers();
-    void createSyncObjects();
-    void createDescriptorObjects();
-
+    PalShader* createShader(const char* path, PalShaderStage stage, PalShaderFormats format);
+        
+    bool createSwapchain(PalWindow* window);
     void resetBatch();
     void flushBatch();
+
     void nextBatch();
     uint32_t getTextureIndex(Texture* texture);
 
 private:
-    PalAdapter* m_Adapter = nullptr;
     PalDevice* m_Device = nullptr;
     PalQueue* m_Queue = nullptr;
     PalSurface* m_Surface = nullptr;
@@ -71,17 +71,13 @@ private:
     PalBuffer* m_IndexBuffer = nullptr;
     PalBuffer* m_IndexStagingBuffer = nullptr;
 
-    PalShaderFormats m_ShaderFormats = 0;
-    uint32_t m_MaxGraphicsQueues = 0;
-    PalFormat m_ImageFormat;
     uint32_t m_FrameIndex = 0;
-
-    uint32_t m_ImageIndex = 0;
-    Frame m_Frames[MAX_FRAMES_IN_FLIGHT];
     PalImageSubresourceRange m_ImageRange;
+    uint32_t m_ImageIndex = 0;
     glm::mat4 m_Projection;
 
     PalSampler* m_Sampler;
     PalViewport m_Viewport;
+    Frame m_Frames[MAX_FRAMES_IN_FLIGHT];
     PalRect2D m_Scissor;
 };

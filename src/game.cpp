@@ -32,8 +32,8 @@ bool Game::initialize()
     // create threads for renderer and assets manager
 
     PalWindowCreateInfo createInfo = {0};
-    createInfo.width = WINDOW_WIDTH;
-    createInfo.height = WINDOW_HEIGHT;
+    // createInfo.width = WINDOW_WIDTH;
+    // createInfo.height = WINDOW_HEIGHT;
     createInfo.show = PAL_TRUE;
     createInfo.title = "Space Ranger";
     createInfo.style = PAL_WINDOW_STYLE_RESIZABLE;
